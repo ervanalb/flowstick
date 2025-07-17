@@ -1,0 +1,122 @@
+(footprint "quad_b2b_pad"
+	(version 20241229)
+	(generator "pcbnew")
+	(generator_version "9.0")
+	(layer "F.Cu")
+	(property "Reference" "REF**"
+		(at 0 -2.5 0)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(uuid "214eb36d-a237-4a4a-ae08-f6fe96c84138")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+		)
+	)
+	(property "Value" "quad_b2b_pad"
+		(at 0 1 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(uuid "b78b9862-d75d-4912-a7eb-b757ed0a64f3")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 0 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "c3076b81-319f-431e-8957-c62d82a14460")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Description" ""
+		(at 0 0 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "45507465-6976-4d51-b05b-6d63780e3352")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(attr smd)
+	(fp_text user "${REFERENCE}"
+		(at 0 2.5 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(uuid "62b41201-0d32-4439-a4b2-ddbec82f07b9")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(pad "1" smd roundrect
+		(at -1.25 -0.7 90)
+		(size 1.2 1)
+		(drill
+			(offset -0.1 0)
+		)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(roundrect_rratio 0.5)
+		(chamfer_ratio 0)
+		(chamfer top_left bottom_left)
+		(thermal_bridge_angle 45)
+		(uuid "0ebb05d9-b32e-4291-9a21-2b9d0cf2dfe3")
+	)
+	(pad "2" smd roundrect
+		(at -0.35 -0.7 90)
+		(size 1.2 0.5)
+		(drill
+			(offset -0.1 0)
+		)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(roundrect_rratio 0.5)
+		(chamfer_ratio 0)
+		(chamfer top_left bottom_left)
+		(thermal_bridge_angle 45)
+		(uuid "e8fc5a2f-b091-4dde-8468-e52216e5dc31")
+	)
+	(pad "3" smd roundrect
+		(at 0.35 -0.7 90)
+		(size 1.2 0.5)
+		(drill
+			(offset -0.1 0)
+		)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(roundrect_rratio 0.5)
+		(chamfer_ratio 0)
+		(chamfer top_left bottom_left)
+		(thermal_bridge_angle 45)
+		(uuid "428d1737-afdb-47ea-aa8a-14e45d273958")
+	)
+	(pad "4" smd roundrect
+		(at 1.25 -0.7 90)
+		(size 1.2 1)
+		(drill
+			(offset -0.1 0)
+		)
+		(layers "F.Cu" "F.Mask" "F.Paste")
+		(roundrect_rratio 0.5)
+		(chamfer_ratio 0)
+		(chamfer top_left bottom_left)
+		(thermal_bridge_angle 45)
+		(uuid "83bf7a3f-53fd-4296-8122-9c24397f1ef3")
+	)
+	(embedded_fonts no)
+)

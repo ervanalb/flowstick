@@ -1,0 +1,19 @@
+
+DTP 701248 350mAh 7.2*12.5*50mm
+https://www.alibaba.com/product-detail/Factory-Customize-DTP-701248-3-7v_1600959489513.html
+
+^^ ORDERED
+
+# DTP 551158 300mAh 5.5*11*58mm 300cycles
+# https://www.alibaba.com/product-detail/Rechargeable-Li-Po-Primary-Cell-3_1601439739550.html
+
+Boost to 5V: MP3414A with inductor https://www.digikey.com/en/products/detail/monolithic-power-systems-inc/MPL-AL4020-3R3/12418227
+Buck to 3.3V: LM3671 with inductor https://www.digikey.com/en/products/detail/taiyo-yuden/NRH2412T100MNGH/4157828
+IMU: LSM6DSV320X
+Battery charger: bq21040
+LEDs: APA102
+
+Crystal: https://www.digikey.com/en/products/detail/ecs-inc/ECS-400-10-37B2-CKY-TR/14548829
+ANT: 2450AT18A100E-AEC
+
+power OR-ing: SDM03MT40
