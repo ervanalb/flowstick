@@ -1,0 +1,306 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'dart:async';
+
+void main() {
+  runApp(MyApp());
+}
+
+class MyApp extends StatefulWidget {
+  @override
+  _MyAppState createState() => _MyAppState();
+}
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'BLE Scanner App',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+      ),
+      home: MainScreen(),
+    );
+  }
+}
+
+class MainScreen extends StatefulWidget {
+  @override
+  _MainScreenState createState() => _MainScreenState();
+}
+
+class _MainScreenState extends State<MainScreen> {
+  BluetoothDevice? connectedDevice;
+  BluetoothAdapterState bluetoothState = BluetoothAdapterState.unknown;
+  late StreamSubscription<BluetoothAdapterState> adapterStateSubscription;
+  late StreamSubscription<BluetoothDevice>> connectedDevicesSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _initBluetooth();
+  }
+
+  void _initBluetooth() async {
+    // Listen to adapter state changes
+    adapterStateSubscription = FlutterBluePlus.adapterState.listen((state) {
+      setState(() {
+        bluetoothState = state;
+      });
+    });
+
+//    // Listen to connected devices
+//    connectedDevicesSubscription = FlutterBluePlus.connectedDevices.listen((devices) {
+//      setState(() {
+//        connectedDevice = devices.isNotEmpty ? devices.first : null;
+//      });
+//    });
+
+    // Get initial state
+    bluetoothState = await FlutterBluePlus.adapterState.first;
+    final devices = await FlutterBluePlus.connectedDevices;
+    setState(() {
+      connectedDevice = devices.isNotEmpty ? devices.first : null;
+    });
+  }
+
+  @override
+  void dispose() {
+    adapterStateSubscription.cancel();
+    connectedDevicesSubscription.cancel();
+    super.dispose();
+  }
+
+  String _getStatusMessage() {
+    if (bluetoothState != BluetoothAdapterState.on) {
+      return 'Bluetooth is disabled';
+    }
+    if (connectedDevice != null) {
+      return 'Connected to: ${connectedDevice!.platformName.isNotEmpty ? connectedDevice!.platformName : 'Unknown Device'}';
+    }
+    return 'No device connected';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('BLE Connection Status'),
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              connectedDevice != null 
+                ? Icons.bluetooth_connected 
+                : Icons.bluetooth_disabled,
+              size: 100,
+              color: connectedDevice != null ? Colors.green : Colors.grey,
+            ),
+            SizedBox(height: 20),
+            Text(
+              _getStatusMessage(),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w500,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: 40),
+            ElevatedButton(
+              onPressed: bluetoothState == BluetoothAdapterState.on
+                ? () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => ScanScreen()),
+                    );
+                  }
+                : null,
+              child: Text('Scan for Devices'),
+              style: ElevatedButton.styleFrom(
+                padding: EdgeInsets.symmetric(horizontal: 30, vertical: 15),
+                textStyle: TextStyle(fontSize: 16),
+              ),
+            ),
+            if (connectedDevice != null) ...[
+              SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: () async {
+                  await connectedDevice!.disconnect();
+                },
+                child: Text('Disconnect'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                  padding: EdgeInsets.symmetric(horizontal: 30, vertical: 15),
+                  textStyle: TextStyle(fontSize: 16),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class ScanScreen extends StatefulWidget {
+  @override
+  _ScanScreenState createState() => _ScanScreenState();
+}
+
+class _ScanScreenState extends State<ScanScreen> {
+  List<ScanResult> scanResults = [];
+  bool isScanning = false;
+  late StreamSubscription<List<ScanResult>> scanSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _startScan();
+  }
+
+  void _startScan() async {
+    if (isScanning) return;
+
+    setState(() {
+      isScanning = true;
+      scanResults.clear();
+    });
+
+    // Listen to scan results
+    scanSubscription = FlutterBluePlus.scanResults.listen((results) {
+      setState(() {
+        scanResults = results;
+      });
+    });
+
+    // Start scanning
+    await FlutterBluePlus.startScan(timeout: Duration(seconds: 15));
+
+    // Stop scanning after timeout
+    await Future.delayed(Duration(seconds: 15));
+    _stopScan();
+  }
+
+  void _stopScan() async {
+    await FlutterBluePlus.stopScan();
+    setState(() {
+      isScanning = false;
+    });
+  }
+
+  void _connectToDevice(BluetoothDevice device) async {
+    try {
+      await device.connect();
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Connected to ${device.platformName.isNotEmpty ? device.platformName : 'Unknown Device'}'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to connect: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    scanSubscription.cancel();
+    _stopScan();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Scan for BLE Devices'),
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: Icon(isScanning ? Icons.stop : Icons.refresh),
+            onPressed: isScanning ? _stopScan : _startScan,
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          if (isScanning)
+            LinearProgressIndicator(),
+          Padding(
+            padding: EdgeInsets.all(16),
+            child: Text(
+              isScanning 
+                ? 'Scanning for devices...' 
+                : 'Found ${scanResults.length} devices',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+            ),
+          ),
+          Expanded(
+            child: scanResults.isEmpty
+                ? Center(
+                    child: Text(
+                      isScanning 
+                        ? 'Looking for devices...' 
+                        : 'No devices found. Tap refresh to scan again.',
+                      style: TextStyle(fontSize: 16),
+                      textAlign: TextAlign.center,
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: scanResults.length,
+                    itemBuilder: (context, index) {
+                      final result = scanResults[index];
+                      final device = result.device;
+                      final deviceName = device.platformName.isNotEmpty 
+                          ? device.platformName 
+                          : 'Unknown Device';
+                      
+                      return Card(
+                        margin: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                        child: ListTile(
+                          leading: Icon(
+                            Icons.bluetooth,
+                            color: Colors.blue,
+                          ),
+                          title: Text(deviceName),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('ID: ${device.remoteId}'),
+                              Text('RSSI: ${result.rssi} dBm'),
+                            ],
+                          ),
+                          trailing: ElevatedButton(
+                            onPressed: () => _connectToDevice(device),
+                            child: Text('Connect'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green,
+                              foregroundColor: Colors.white,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: isScanning ? _stopScan : _startScan,
+        child: Icon(isScanning ? Icons.stop : Icons.search),
+        backgroundColor: Colors.blue,
+        foregroundColor: Colors.white,
+      ),
+    );
+  }
+}
