@@ -106,8 +106,6 @@ class MyCubit extends Cubit<MyState> {
       FlutterBluePlus.turnOn(); // don't await
     }
 
-    var a = FlutterBluePlus.adapterStateNow;
-
     try {
       await completer.future;
     } catch (e) {
@@ -136,9 +134,11 @@ class MyCubit extends Cubit<MyState> {
 
     FlutterBluePlus.startScan(
       withServices:[Guid.fromBytes([0x18,0x09])],
-    );
-
-    emit(MyState.scanning([]));
+    ).then((data) {
+      emit(MyState.scanning([]));
+    }).catchError((e) {
+      emit(MyState.error('$e'));
+    });
   }
 
   _stopScanning() {
