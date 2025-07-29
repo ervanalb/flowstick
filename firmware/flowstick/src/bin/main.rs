@@ -3,7 +3,7 @@
 
 use esp_alloc as _;
 use esp_backtrace as _;
-use esp_hal::{time, spi, main, usb_serial_jtag::UsbSerialJtag, timer::timg, rng};
+use esp_hal::{time, spi, main, usb_serial_jtag::UsbSerialJtag, timer::timg, rng, delay, gpio};
 //use log::info;
 use esp_println::println;
 
@@ -30,13 +30,18 @@ fn main() -> ! {
     UsbSerialJtag::new(peripherals.USB_DEVICE);
     esp_println::logger::init_logger_from_env();
 
+    let mut pwrhld = gpio::Output::new(peripherals.GPIO11, gpio::Level::Low, gpio::OutputConfig::default());
+    let mut button = gpio::Input::new(peripherals.GPIO10, gpio::InputConfig::default().with_pull(gpio::Pull::Down));
+
     let mut spi = spi::master::Spi::new(
         peripherals.SPI2,
         spi::master::Config::default()
             .with_frequency(time::Rate::from_khz(100))
             .with_mode(spi::Mode::_0),
     ).unwrap()
-    .with_sck(peripherals.GPIO11).with_mosi(peripherals.GPIO12);
+    .with_sck(peripherals.GPIO37).with_mosi(peripherals.GPIO21);
+
+/*
 
     // Bluetooth
     let timg0 = timg::TimerGroup::new(peripherals.TIMG0);
@@ -117,18 +122,22 @@ fn main() -> ! {
 
         loop {}
     }
+*/
 
-/*
     let delay = delay::Delay::new();
     let mut h = 0;
-    info!("Color fade!");
     loop {
         delay.delay_millis(10);
-        let [r, g, b] = hsv2rgb([h, 255, 255]);
-        spi.write(&[0x00, 0x00, 0x00, 0x00, 0xE1, b, g, r]).unwrap();
+        spi.write(&[0x00, 0x00, 0x00, 0x00]).unwrap();
+        let mut h2 = h;
+        for i in 0..40 {
+            let [r, g, b] = hsv2rgb([h2, 255, 255]);
+            spi.write(&[0xE1, b, g, r]).unwrap();
+            h2 = h2.wrapping_add(3);
+        }
         h = h.wrapping_add(1);
     }
-*/
+
 
 
 }
