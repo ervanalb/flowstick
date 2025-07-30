@@ -30,6 +30,7 @@ esp-backtrace = { version = "0.16.0", features = [
     "exception-handler",
     "panic-handler",
     "println",
+    "semihosting",  # Not technically correct but prevents USB serial/JTAG from being shut down on panic
 ]}
 esp-println = { version = "0.14.0", features = ["esp32s3", "log-04"] }
 log = "0.4.27"
