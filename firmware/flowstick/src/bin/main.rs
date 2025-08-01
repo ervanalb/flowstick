@@ -4,7 +4,7 @@
 use esp_alloc as _;
 use esp_backtrace as _;
 use esp_hal::{
-    dma, dma_circular_buffers, gpio, i2s, main, rng, spi, time, timer,
+    analog, dma, dma_circular_buffers, gpio, i2s, main, peripherals, rng, spi, time, timer,
     usb_serial_jtag::UsbSerialJtag, Blocking,
 };
 //use log::info;
@@ -35,7 +35,10 @@ pub struct Hardware<'d> {
     vbus_sense: &'d gpio::Input<'static>,
     chg_sense: &'d gpio::Input<'static>,
     i2s_transfer: dma::DmaTransferTxCircular<'d, i2s::master::I2sTx<'static, Blocking>>,
-    spi: spi::master::Spi<'static, Blocking>,
+    spi: &'d mut spi::master::Spi<'static, Blocking>,
+    adc: &'d mut analog::adc::Adc<'static, peripherals::ADC1<'static>, Blocking>,
+    vref: &'d mut analog::adc::AdcPin<peripherals::GPIO8<'static>, peripherals::ADC1<'static>>,
+    batt_measure: &'d mut analog::adc::AdcPin<peripherals::GPIO9<'static>, peripherals::ADC1<'static>>,
 }
 
 pub fn with_hardware<T, F: FnOnce(Hardware) -> T>(f: F) -> T {
@@ -102,6 +105,12 @@ pub fn with_hardware<T, F: FnOnce(Hardware) -> T>(f: F) -> T {
     .with_mosi(peripherals.GPIO34)
     .with_sck(peripherals.GPIO35)
     .with_cs(peripherals.GPIO36);
+
+    // ADC for battery
+    let mut adc_config = analog::adc::AdcConfig::new();
+    let mut vref = adc_config.enable_pin(peripherals.GPIO8, analog::adc::Attenuation::_11dB);
+    let mut batt_measure = adc_config.enable_pin(peripherals.GPIO9, analog::adc::Attenuation::_11dB);
+    let mut adc = analog::adc::Adc::new(peripherals.ADC1, adc_config);
 
     /*
     // Bluetooth
@@ -187,7 +196,10 @@ pub fn with_hardware<T, F: FnOnce(Hardware) -> T>(f: F) -> T {
         vbus_sense: &vbus_sense,
         chg_sense: &chg_sense,
         i2s_transfer,
-        spi,
+        spi: &mut spi,
+        adc: &mut adc,
+        vref: &mut vref,
+        batt_measure: &mut batt_measure,
     })
 }
 
@@ -222,6 +234,13 @@ impl Hardware<'_> {
 
     pub fn charging(&self) -> bool {
         self.chg_sense.is_low()
+    }
+
+    pub fn read_batt_voltage(&mut self) -> u16 {
+        let vref = self.adc.read_blocking(self.vref);
+        let batt_measure = self.adc.read_blocking(self.batt_measure);
+        println!("vref={:?}, batt_measure={:?}", vref, batt_measure);
+        0
     }
 }
 
@@ -350,6 +369,7 @@ fn main() -> ! {
 
             println!("Usb power: {}", usb_power);
             println!("Charging: {}", charging);
+            hardware.read_batt_voltage();
 
             // Handle state transitions
             match power_state {
