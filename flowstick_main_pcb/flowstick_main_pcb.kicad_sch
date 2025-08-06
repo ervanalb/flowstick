@@ -6532,7 +6532,7 @@
 		)
 		(uuid "266aeeed-a2c9-4911-ba1e-0683c4fe48fb")
 	)
-	(label "IMU_PICO"
+	(label "IMU_MISO"
 		(at 228.6 71.12 0)
 		(effects
 			(font
@@ -6692,7 +6692,7 @@
 		)
 		(uuid "c05aeecd-7fba-4c7c-9b01-26b96a6389d6")
 	)
-	(label "IMU_POCI"
+	(label "IMU_MOSI"
 		(at 236.22 81.28 180)
 		(effects
 			(font
@@ -13115,7 +13115,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "1M"
+		(property "Value" "137K"
 			(at 48.26 181.6099 0)
 			(effects
 				(font

@@ -72,7 +72,7 @@
 		(drill
 			(offset -0.1 0)
 		)
-		(layers "F.Cu" "F.Mask" "F.Paste")
+		(layers "F.Cu" "F.Mask")
 		(roundrect_rratio 0.5)
 		(chamfer_ratio 0)
 		(chamfer top_left bottom_left)
@@ -85,7 +85,7 @@
 		(drill
 			(offset -0.1 0)
 		)
-		(layers "F.Cu" "F.Mask" "F.Paste")
+		(layers "F.Cu" "F.Mask")
 		(roundrect_rratio 0.5)
 		(chamfer_ratio 0)
 		(chamfer top_left bottom_left)
@@ -98,7 +98,7 @@
 		(drill
 			(offset -0.1 0)
 		)
-		(layers "F.Cu" "F.Mask" "F.Paste")
+		(layers "F.Cu" "F.Mask")
 		(roundrect_rratio 0.5)
 		(chamfer_ratio 0)
 		(chamfer top_left bottom_left)
@@ -111,7 +111,7 @@
 		(drill
 			(offset -0.1 0)
 		)
-		(layers "F.Cu" "F.Mask" "F.Paste")
+		(layers "F.Cu" "F.Mask")
 		(roundrect_rratio 0.5)
 		(chamfer_ratio 0)
 		(chamfer top_left bottom_left)

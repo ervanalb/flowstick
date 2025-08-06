@@ -432,6 +432,113 @@
 			)
 			(embedded_fonts no)
 		)
+		(symbol "Mechanical:MountingHole_Pad"
+			(pin_numbers
+				(hide yes)
+			)
+			(pin_names
+				(offset 1.016)
+				(hide yes)
+			)
+			(exclude_from_sim no)
+			(in_bom no)
+			(on_board yes)
+			(property "Reference" "H"
+				(at 0 6.35 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Value" "MountingHole_Pad"
+				(at 0 4.445 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Footprint" ""
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "Datasheet" "~"
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "Description" "Mounting Hole with connection"
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "ki_keywords" "mounting hole"
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(property "ki_fp_filters" "MountingHole*Pad*"
+				(at 0 0 0)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+					(hide yes)
+				)
+			)
+			(symbol "MountingHole_Pad_0_1"
+				(circle
+					(center 0 1.27)
+					(radius 1.27)
+					(stroke
+						(width 1.27)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+			)
+			(symbol "MountingHole_Pad_1_1"
+				(pin input line
+					(at 0 -2.54 90)
+					(length 2.54)
+					(name "1"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "1"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+			)
+			(embedded_fonts no)
+		)
 	)
 	(junction
 		(at 190.5 109.22)
@@ -656,6 +763,12 @@
 		(uuid "5618f98e-7a50-4d47-a3e2-757d58245322")
 	)
 	(junction
+		(at 255.27 53.34)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "563fd2f5-a5d8-4307-b9f0-82a3e5273f1c")
+	)
+	(junction
 		(at 68.58 45.72)
 		(diameter 0)
 		(color 0 0 0 0)
@@ -756,6 +869,12 @@
 		(diameter 0)
 		(color 0 0 0 0)
 		(uuid "9b96eacf-380b-410d-9a31-d124df7903c4")
+	)
+	(junction
+		(at 242.57 53.34)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "a40dee61-e4e2-4496-8037-010b7a438c92")
 	)
 	(junction
 		(at 223.52 53.34)
@@ -884,6 +1003,12 @@
 		(uuid "d887910c-975a-49ad-a434-d3f671fb2864")
 	)
 	(junction
+		(at 229.87 53.34)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "e2ffefcc-023d-4eee-83af-049c66a6b13e")
+	)
+	(junction
 		(at 236.22 60.96)
 		(diameter 0)
 		(color 0 0 0 0)
@@ -1001,7 +1126,7 @@
 	)
 	(wire
 		(pts
-			(xy 248.92 53.34) (xy 261.62 53.34)
+			(xy 248.92 53.34) (xy 255.27 53.34)
 		)
 		(stroke
 			(width 0)
@@ -1161,13 +1286,23 @@
 	)
 	(wire
 		(pts
-			(xy 236.22 53.34) (xy 248.92 53.34)
+			(xy 236.22 53.34) (xy 242.57 53.34)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
 		(uuid "37af204e-750d-493d-a593-bfc84b460c59")
+	)
+	(wire
+		(pts
+			(xy 229.87 53.34) (xy 236.22 53.34)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "3b9d3c64-381a-417e-8632-4f8192896a78")
 	)
 	(wire
 		(pts
@@ -1311,6 +1446,16 @@
 	)
 	(wire
 		(pts
+			(xy 242.57 53.34) (xy 248.92 53.34)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "52d2cc33-9d45-418e-9a57-3676f8043728")
+	)
+	(wire
+		(pts
 			(xy 83.82 45.72) (xy 99.06 45.72)
 		)
 		(stroke
@@ -1361,6 +1506,16 @@
 	)
 	(wire
 		(pts
+			(xy 255.27 53.34) (xy 261.62 53.34)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "62e1bc5e-42de-40ed-9cc5-42052ddf068d")
+	)
+	(wire
+		(pts
 			(xy 129.54 109.22) (xy 144.78 109.22)
 		)
 		(stroke
@@ -1408,6 +1563,16 @@
 			(type default)
 		)
 		(uuid "681f330a-58e4-4de8-9f5b-20c4a209351b")
+	)
+	(wire
+		(pts
+			(xy 29.21 45.72) (xy 53.34 45.72)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "69fcbb44-cd16-4cbb-8439-8686fbdce6b0")
 	)
 	(wire
 		(pts
@@ -1558,6 +1723,16 @@
 			(type default)
 		)
 		(uuid "87a451ee-cd7a-41f3-89d9-86b21a127a64")
+	)
+	(wire
+		(pts
+			(xy 29.21 60.96) (xy 53.34 60.96)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "87d63c23-652a-49a0-998f-f0e0ad9ede46")
 	)
 	(wire
 		(pts
@@ -1801,7 +1976,7 @@
 	)
 	(wire
 		(pts
-			(xy 223.52 53.34) (xy 236.22 53.34)
+			(xy 223.52 53.34) (xy 229.87 53.34)
 		)
 		(stroke
 			(width 0)
@@ -1891,6 +2066,16 @@
 	)
 	(wire
 		(pts
+			(xy 29.21 50.8) (xy 45.72 50.8)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "b25e3615-7a7a-4889-8a54-f6abbf9472fe")
+	)
+	(wire
+		(pts
 			(xy 236.22 60.96) (xy 248.92 60.96)
 		)
 		(stroke
@@ -1918,16 +2103,6 @@
 			(type default)
 		)
 		(uuid "b312c237-7248-4d86-8696-73285e84ec1d")
-	)
-	(wire
-		(pts
-			(xy 45.72 45.72) (xy 53.34 45.72)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "b48b8f57-d299-483f-a256-c7c6c7eb702f")
 	)
 	(wire
 		(pts
@@ -2041,6 +2216,16 @@
 	)
 	(wire
 		(pts
+			(xy 29.21 53.34) (xy 45.72 53.34)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "c1d6dc60-aff4-4bd1-941a-ce66e3c7fcfb")
+	)
+	(wire
+		(pts
 			(xy 203.2 85.09) (xy 203.2 101.6)
 		)
 		(stroke
@@ -2138,16 +2323,6 @@
 			(type default)
 		)
 		(uuid "d4abce8d-cc2a-468d-bd3a-130b30e26adb")
-	)
-	(wire
-		(pts
-			(xy 45.72 60.96) (xy 53.34 60.96)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "d98ead17-77fc-41eb-8d9c-dcde3ae9aec7")
 	)
 	(wire
 		(pts
@@ -2391,7 +2566,7 @@
 	)
 	(hierarchical_label "+5V"
 		(shape input)
-		(at 45.72 45.72 180)
+		(at 29.21 45.72 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2402,7 +2577,7 @@
 	)
 	(hierarchical_label "CKI"
 		(shape input)
-		(at 45.72 53.34 180)
+		(at 29.21 53.34 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2413,7 +2588,7 @@
 	)
 	(hierarchical_label "GND"
 		(shape input)
-		(at 45.72 60.96 180)
+		(at 29.21 60.96 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -2424,7 +2599,7 @@
 	)
 	(hierarchical_label "SDI"
 		(shape input)
-		(at 45.72 50.8 180)
+		(at 29.21 50.8 180)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -3675,6 +3850,77 @@
 		)
 	)
 	(symbol
+		(lib_id "Mechanical:MountingHole_Pad")
+		(at 255.27 50.8 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom no)
+		(on_board yes)
+		(dnp no)
+		(uuid "43595a6b-4d7d-4acc-8d4a-d9e969acfc44")
+		(property "Reference" "H5"
+			(at 257.81 48.2599 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "MountingHole_Pad"
+			(at 257.81 50.7999 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+		(property "Footprint" "custom:single_b2b_pad_doublewide"
+			(at 255.27 50.8 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "~"
+			(at 255.27 50.8 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Mounting Hole with connection"
+			(at 255.27 50.8 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "4a9853ae-c517-46f6-acad-cdc02bb5cf19")
+		)
+		(instances
+			(project "flowstick_led_strip_pcbs"
+				(path "/d9730be9-9354-4306-a577-cd47faad384c/3ed16589-086b-439f-b2d4-16c86064fb3d"
+					(reference "H6")
+					(unit 1)
+				)
+				(path "/d9730be9-9354-4306-a577-cd47faad384c/f7bcb00a-3c3b-49e6-b0fb-fd801a6a890d"
+					(reference "H5")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "LED:APA102-2020")
 		(at 160.02 148.59 0)
 		(unit 1)
@@ -3923,6 +4169,77 @@
 				)
 				(path "/d9730be9-9354-4306-a577-cd47faad384c/f7bcb00a-3c3b-49e6-b0fb-fd801a6a890d"
 					(reference "D20")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Mechanical:MountingHole_Pad")
+		(at 229.87 50.8 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom no)
+		(on_board yes)
+		(dnp no)
+		(uuid "68e79dcb-dafd-4757-b524-4f02c1e3e575")
+		(property "Reference" "H1"
+			(at 232.41 48.2599 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "MountingHole_Pad"
+			(at 232.41 50.7999 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+		(property "Footprint" "custom:single_b2b_pad_doublewide"
+			(at 229.87 50.8 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "~"
+			(at 229.87 50.8 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Mounting Hole with connection"
+			(at 229.87 50.8 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "0bbb44f5-8c96-4425-b01d-234b773c8f6a")
+		)
+		(instances
+			(project ""
+				(path "/d9730be9-9354-4306-a577-cd47faad384c/3ed16589-086b-439f-b2d4-16c86064fb3d"
+					(reference "H2")
+					(unit 1)
+				)
+				(path "/d9730be9-9354-4306-a577-cd47faad384c/f7bcb00a-3c3b-49e6-b0fb-fd801a6a890d"
+					(reference "H1")
 					(unit 1)
 				)
 			)
@@ -4373,6 +4690,77 @@
 				)
 				(path "/d9730be9-9354-4306-a577-cd47faad384c/f7bcb00a-3c3b-49e6-b0fb-fd801a6a890d"
 					(reference "D23")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "Mechanical:MountingHole_Pad")
+		(at 242.57 50.8 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom no)
+		(on_board yes)
+		(dnp no)
+		(uuid "7e4cd26f-2c4a-4243-afb9-f043a6b8ab52")
+		(property "Reference" "H3"
+			(at 245.11 48.2599 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "MountingHole_Pad"
+			(at 245.11 50.7999 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+				(hide yes)
+			)
+		)
+		(property "Footprint" "custom:single_b2b_pad_doublewide"
+			(at 242.57 50.8 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Datasheet" "~"
+			(at 242.57 50.8 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "Description" "Mounting Hole with connection"
+			(at 242.57 50.8 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(pin "1"
+			(uuid "f4af337d-5e49-4f7d-8a48-94bbcd0d6132")
+		)
+		(instances
+			(project "flowstick_led_strip_pcbs"
+				(path "/d9730be9-9354-4306-a577-cd47faad384c/3ed16589-086b-439f-b2d4-16c86064fb3d"
+					(reference "H4")
+					(unit 1)
+				)
+				(path "/d9730be9-9354-4306-a577-cd47faad384c/f7bcb00a-3c3b-49e6-b0fb-fd801a6a890d"
+					(reference "H3")
 					(unit 1)
 				)
 			)

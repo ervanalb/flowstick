@@ -1,0 +1,116 @@
+(footprint "mousebite_5"
+	(version 20241229)
+	(generator "pcbnew")
+	(generator_version "9.0")
+	(layer "F.Cu")
+	(property "Reference" "REF**"
+		(at 0 -0.5 0)
+		(unlocked yes)
+		(layer "F.SilkS")
+		(hide yes)
+		(uuid "6013bd6c-c3c9-4f55-b87f-1decde1bcaa7")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.1)
+			)
+		)
+	)
+	(property "Value" "mousebite_5"
+		(at 0 1 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(uuid "d633ad1a-a493-4c6b-b44f-85b2159af689")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 0 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "e66a49dc-f12f-46f7-bcc0-04ad8c004028")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Description" ""
+		(at 0 0 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "d91f5aa7-fe5c-4c91-b3fd-99eddbc1b7a4")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(attr smd)
+	(fp_arc
+		(start -1 -0.8)
+		(mid -1.234315 -0.234315)
+		(end -1.8 0)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(layer "Edge.Cuts")
+		(uuid "52e61712-e64f-4b5e-aec0-1024e2d58cbe")
+	)
+	(fp_arc
+		(start 1.8 0)
+		(mid 1.234315 -0.234315)
+		(end 1 -0.8)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(layer "Edge.Cuts")
+		(uuid "ce301c5a-aeb2-41a7-a099-4eed9fc0bf04")
+	)
+	(pad "" np_thru_hole circle
+		(at -1.675 -0.075)
+		(size 0.6 0.6)
+		(drill 0.6)
+		(layers "F&B.Cu")
+		(uuid "6f3f238c-3387-40b1-85c0-3f405ece50f1")
+	)
+	(pad "" np_thru_hole circle
+		(at -0.8 0)
+		(size 0.45 0.45)
+		(drill 0.45)
+		(layers "F&B.Cu")
+		(uuid "e9ab7d3a-f566-4466-a35b-657678373780")
+	)
+	(pad "" np_thru_hole circle
+		(at 0 0)
+		(size 0.45 0.45)
+		(drill 0.45)
+		(layers "F&B.Cu")
+		(uuid "ef3fa888-b659-4a3a-9046-e89e5ccb6926")
+	)
+	(pad "" np_thru_hole circle
+		(at 0.8 0)
+		(size 0.45 0.45)
+		(drill 0.45)
+		(layers "F&B.Cu")
+		(uuid "a9736f9e-5b11-474f-8049-7b5df2e2ba98")
+	)
+	(pad "" np_thru_hole circle
+		(at 1.675 -0.075)
+		(size 0.6 0.6)
+		(drill 0.6)
+		(layers "F&B.Cu")
+		(uuid "560187cd-d67c-481d-a410-65627db8f3a2")
+	)
+	(embedded_fonts no)
+)
