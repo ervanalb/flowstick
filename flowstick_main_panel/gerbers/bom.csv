@@ -1,0 +1,31 @@
+Designator,Quantity,Value,Footprint,Manufacturer,Part Number,JLCPCB Part #
+AE1,4,,Resistor_SMD:R_1206_3216Metric,Johanson Technology,2450AT18A100E-AEC,C89334
+"C1,C2,C3,C4,C16",20,100n,Capacitor_SMD:C_0402_1005Metric,,,C1525
+"C5,C6",8,15p,Capacitor_SMD:C_0201_0603Metric,,,C64554
+"C7,C8",8,1.5p,Capacitor_SMD:C_0201_0603Metric,,,C50389
+"C9,C12",8,10u,Capacitor_SMD:C_1206_3216Metric,,,C319199
+C10,4,22u,Capacitor_SMD:C_1206_3216Metric,,,C386064
+C11,4,100n,Capacitor_SMD:C_0201_0603Metric,,,C284966
+"C13,C14,C15",12,10n,Capacitor_SMD:C_0201_0603Metric,,,C43380
+C17,4,1n,Capacitor_SMD:C_0201_0603Metric,,,C66942
+C18,4,1u,Capacitor_SMD:C_0201_0603Metric,,,C53067
+D1,4,,Package_TO_SOT_SMD:SOT-23-6,Diodes Incorporated,SDM03MT40,C526762
+J1,4,USB_C_Receptacle_USB2.0_16P,Connector_USB:USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal,GCT,USB4105-GF-A,C3020560
+L1,4,24n,Inductor_SMD:L_0201_0603Metric,,,C206441
+L2,4,2.7n,Inductor_SMD:L_0201_0603Metric,,,C76751
+L3,4,3u3,Inductor_SMD:L_Taiyo-Yuden_NR-50xx,Taiyo Yuden,NRS5030T3R3MMGJ,C222937
+L4,4,3u3,Inductor_SMD:L_Taiyo-Yuden_NR-24xx,Taiyo Yuden,NRH2412T3R3MNGH,C222843
+"R1,R2",8,5K1,Capacitor_SMD:C_0201_0603Metric,,,C226588
+"R3,R4",8,22R,Capacitor_SMD:C_0201_0603Metric,,,C155743
+"R5,R8,R9,R10,R11,R14",24,1M,Capacitor_SMD:C_0201_0603Metric,,,C226459
+"R6,R7",8,137K,Capacitor_SMD:C_0201_0603Metric,,,C473623
+R12,4,1K,Capacitor_SMD:C_0201_0603Metric,,,C138165
+R13,4,680K,Capacitor_SMD:C_0201_0603Metric,,,C473493
+R15,4,10K,Resistor_SMD:R_0201_0603Metric,,,C106225
+SW1,4,,Button_Switch_SMD:SW_SPST_EVQP7C,Panasonic,EVQ-P7C01P,C388883
+U1,4,,Package_DFN_QFN:QFN-56-1EP_7x7mm_P0.4mm_EP4x4mm,Espressif,ESP32-S3FH4R2,C3013940
+U2,4,,Package_TO_SOT_SMD:TSOT-23-8,Monolithic Power Systems,MP3414AGJ-Z,C111682
+U3,4,3V3,Package_TO_SOT_SMD:TSOT-23-5,Texas Instruments,LM3671MFX-3.3/NOPB,C201586
+U4,4,,Package_TO_SOT_SMD:SOT-23-6,Texas Instruments,BQ21040DBV,C78978
+U5,4,,Package_LGA:LGA-14_3x2.5mm_P0.5mm_LayoutBorder3x4y,STMicroelectronics,LSM6DSV320X,C26633007
+Y1,4,40M,Crystal:Crystal_SMD_2016-4Pin_2.0x1.6mm,ECS,ECS-400-10-37B2-CKY-TR,C5371760
