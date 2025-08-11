@@ -4,11 +4,11 @@
 use esp_alloc as _;
 use esp_backtrace as _;
 use esp_hal::{
-    analog, dma, dma_circular_buffers, gpio, i2s, main, peripherals, rng, spi, time, timer,
-    usb_serial_jtag::UsbSerialJtag, Blocking,
+    analog, delay, dma, dma_circular_descriptors, gpio, i2s, peripherals, rng, rtc_cntl, spi, time,
+    timer, usb_serial_jtag::UsbSerialJtag, Blocking,
 };
-//use log::info;
 use esp_println::println;
+use log::info;
 
 use bleps::{
     ad_structure::{
@@ -29,25 +29,127 @@ pub const FRAME_SIZE_BYTES: usize = LED_DATA_LEADER_BYTES + 4 * LED_COUNT + LED_
 pub const IMAGE_DATA: &[u8] = include_bytes!("../test.data");
 pub const IMAGE_DATA_FRAMES: usize = IMAGE_DATA.len() / (3 * 40);
 
-pub struct Hardware<'d> {
-    pwrhld: &'d mut gpio::Output<'static>,
-    button: &'d gpio::Input<'static>,
-    vbus_sense: &'d gpio::Input<'static>,
-    chg_sense: &'d gpio::Input<'static>,
-    i2s_transfer: dma::DmaTransferTxCircular<'d, i2s::master::I2sTx<'static, Blocking>>,
-    spi: &'d mut spi::master::Spi<'static, Blocking>,
-    adc: &'d mut analog::adc::Adc<'static, peripherals::ADC1<'static>, Blocking>,
-    vref: &'d mut analog::adc::AdcPin<peripherals::GPIO8<'static>, peripherals::ADC1<'static>>,
-    batt_measure: &'d mut analog::adc::AdcPin<peripherals::GPIO9<'static>, peripherals::ADC1<'static>>,
+struct LedDma<'d> {
+    i2s_transfer: dma::DmaTransferTxCircular<'d, i2s::master::I2sTx<'d, Blocking>>,
 }
 
-pub fn with_hardware<T, F: FnOnce(Hardware) -> T>(f: F) -> T {
-    let peripherals = esp_hal::init(esp_hal::Config::default());
+struct LedDriverHighPower<'d> {
+    i2s_tx: i2s::master::I2sTx<'d, Blocking>,
+}
+
+impl<'a> LedDriverHighPower<'a> {
+    fn begin_dma(&'a mut self) -> LedDma<'a> {
+        let buf = i2s_tx_buffer();
+        buf.fill(0x00);
+        let i2s_transfer = self.i2s_tx.write_dma_circular(buf).unwrap();
+        LedDma { i2s_transfer }
+    }
+}
+
+impl LedDma<'_> {
+    pub fn feed<F: FnMut(&mut [u8])>(&mut self, mut f: F) {
+        self.i2s_transfer
+            .push_with(|buf| {
+                let frames = buf.len() / FRAME_SIZE_BYTES;
+                for i in 0..frames {
+                    f(&mut buf[i * FRAME_SIZE_BYTES..(i + 1) * FRAME_SIZE_BYTES]);
+                }
+                frames * FRAME_SIZE_BYTES
+            })
+            .unwrap();
+    }
+}
+
+struct LedDriverLowPower<'d> {
+    spi: spi::master::Spi<'d, Blocking>,
+}
+
+impl LedDriverLowPower<'_> {
+    pub fn write_bytes(&mut self, frame: &[u8]) {
+        self.spi.write(frame).unwrap();
+    }
+}
+
+pub struct LedHardware {
+    dat: peripherals::GPIO21<'static>,
+    clk: peripherals::GPIO37<'static>,
+    spi: peripherals::SPI3<'static>,
+    i2s: peripherals::I2S0<'static>,
+    dma: peripherals::DMA_CH0<'static>,
+}
+
+impl LedHardware {
+    fn build_high_power(&mut self) -> LedDriverHighPower {
+        let i2s = i2s::master::I2s::new(
+            self.i2s.reborrow(),
+            i2s::master::Standard::Philips,
+            i2s::master::DataFormat::Data8Channel8,
+            time::Rate::from_hz(624999), // 5 MHz bit clock. There is a bug preventing use of
+            // 625000, but this gives the same clock register values
+            self.dma.reborrow(),
+        );
+
+        let (_, i2s_tx_descriptors) = dma_circular_descriptors!(FRAME_SIZE_BYTES * 64);
+        let i2s_tx = i2s
+            .i2s_tx
+            .with_bclk(self.clk.reborrow())
+            .with_dout(self.dat.reborrow())
+            .build(i2s_tx_descriptors); // There is currently no way to build a descriptor chain with chunk
+                                        // size other than dma::CHUNK_SIZE
+
+        LedDriverHighPower { i2s_tx }
+    }
+
+    fn build_low_power(&mut self) -> LedDriverLowPower {
+        let spi = spi::master::Spi::new(
+            self.spi.reborrow(),
+            spi::master::Config::default()
+                .with_frequency(time::Rate::from_khz(1000))
+                .with_mode(spi::Mode::_0),
+        )
+        .unwrap()
+        .with_mosi(self.dat.reborrow())
+        .with_sck(self.clk.reborrow());
+
+        LedDriverLowPower { spi }
+    }
+}
+
+struct ControlDriver {
+    pwrhld: gpio::Output<'static>,
+    button: gpio::Input<'static>,
+    vbus_sense: gpio::Input<'static>,
+    chg_sense: gpio::Input<'static>,
+    imu_spi: spi::master::Spi<'static, Blocking>,
+    adc: analog::adc::Adc<'static, peripherals::ADC1<'static>, Blocking>,
+    vref: analog::adc::AdcPin<peripherals::GPIO8<'static>, peripherals::ADC1<'static>>,
+    batt_measure: analog::adc::AdcPin<peripherals::GPIO9<'static>, peripherals::ADC1<'static>>,
+    rtc: rtc_cntl::Rtc<'static>,
+    last_button_held: bool,
+}
+
+struct UsbHardware {
+    usb: peripherals::USB_DEVICE<'static>,
+}
+
+impl UsbHardware {
+    fn build_serial_jtag(&mut self) -> UsbSerialJtag<'_, Blocking> {
+        UsbSerialJtag::new(self.usb.reborrow())
+    }
+}
+
+fn init() -> (ControlDriver, LedHardware) {
     esp_alloc::heap_allocator!(size: 72 * 1024);
+    let peripherals = esp_hal::init(esp_hal::Config::default());
     UsbSerialJtag::new(peripherals.USB_DEVICE);
     esp_println::logger::init_logger_from_env();
 
-    let mut pwrhld = gpio::Output::new(
+    // Embassy
+    let timg0 = timer::timg::TimerGroup::new(peripherals.TIMG0);
+    esp_hal_embassy::init(timg0.timer0);
+
+    // Peripherals
+    let pwrhld = gpio::Output::new(
         peripherals.GPIO11,
         gpio::Level::Low,
         gpio::OutputConfig::default(),
@@ -61,40 +163,22 @@ pub fn with_hardware<T, F: FnOnce(Hardware) -> T>(f: F) -> T {
         gpio::OutputConfig::default(),
     );
 
-    let button = gpio::Input::new(
+    let mut button = gpio::Input::new(
         peripherals.GPIO10,
         gpio::InputConfig::default().with_pull(gpio::Pull::Down),
     );
+    button
+        .wakeup_enable(true, gpio::WakeEvent::HighLevel)
+        .unwrap();
+
     let vbus_sense = gpio::Input::new(peripherals.GPIO38, gpio::InputConfig::default());
     let chg_sense = gpio::Input::new(
         peripherals.GPIO12,
         gpio::InputConfig::default().with_pull(gpio::Pull::Up),
     );
 
-    // I2S for writing out to the LEDs
-    let (_, _, mut i2s_tx_buffer, i2s_tx_descriptors) =
-        dma_circular_buffers!(FRAME_SIZE_BYTES * 64); // Chunk size must be dma::CHUNK_SIZE
-
-    let i2s = i2s::master::I2s::new(
-        peripherals.I2S0,
-        i2s::master::Standard::Philips,
-        i2s::master::DataFormat::Data8Channel8,
-        time::Rate::from_hz(624999), // 5 MHz bit clock. There is a bug preventing use of
-        // 625000, but this gives the same clock register values
-        peripherals.DMA_CH0,
-    );
-
-    let mut i2s_tx = i2s
-        .i2s_tx
-        .with_bclk(peripherals.GPIO37)
-        .with_dout(peripherals.GPIO21)
-        .build(i2s_tx_descriptors); // There is currently no way to build a descriptor chain with chunk
-                                    // size other than dma::CHUNK_SIZE
-
-    let i2s_transfer = i2s_tx.write_dma_circular(&mut i2s_tx_buffer).unwrap();
-
     // SPI for the accelerometer
-    let mut spi = spi::master::Spi::new(
+    let imu_spi = spi::master::Spi::new(
         peripherals.SPI2,
         spi::master::Config::default()
             .with_frequency(time::Rate::from_khz(100))
@@ -108,9 +192,9 @@ pub fn with_hardware<T, F: FnOnce(Hardware) -> T>(f: F) -> T {
 
     // ADC for battery
     let mut adc_config = analog::adc::AdcConfig::new();
-    let mut vref = adc_config.enable_pin(peripherals.GPIO8, analog::adc::Attenuation::_11dB);
-    let mut batt_measure = adc_config.enable_pin(peripherals.GPIO9, analog::adc::Attenuation::_11dB);
-    let mut adc = analog::adc::Adc::new(peripherals.ADC1, adc_config);
+    let vref = adc_config.enable_pin(peripherals.GPIO8, analog::adc::Attenuation::_11dB);
+    let batt_measure = adc_config.enable_pin(peripherals.GPIO9, analog::adc::Attenuation::_11dB);
+    let adc = analog::adc::Adc::new(peripherals.ADC1, adc_config);
 
     /*
     // Bluetooth
@@ -190,20 +274,32 @@ pub fn with_hardware<T, F: FnOnce(Hardware) -> T>(f: F) -> T {
     }
     */
 
-    f(Hardware {
-        pwrhld: &mut pwrhld,
-        button: &button,
-        vbus_sense: &vbus_sense,
-        chg_sense: &chg_sense,
-        i2s_transfer,
-        spi: &mut spi,
-        adc: &mut adc,
-        vref: &mut vref,
-        batt_measure: &mut batt_measure,
-    })
+    let rtc = rtc_cntl::Rtc::new(peripherals.LPWR);
+
+    (
+        ControlDriver {
+            pwrhld,
+            button,
+            vbus_sense,
+            chg_sense,
+            imu_spi,
+            adc,
+            vref,
+            batt_measure,
+            rtc,
+            last_button_held: false,
+        },
+        LedHardware {
+            dat: peripherals.GPIO21,
+            clk: peripherals.GPIO37,
+            spi: peripherals.SPI3,
+            i2s: peripherals.I2S0,
+            dma: peripherals.DMA_CH0,
+        },
+    )
 }
 
-impl Hardware<'_> {
+impl ControlDriver {
     pub fn hold_power_on(&mut self) {
         self.pwrhld.set_high();
     }
@@ -212,10 +308,14 @@ impl Hardware<'_> {
         self.pwrhld.set_low();
     }
 
-    pub fn button_pressed(&self) -> bool {
-        self.button.is_high()
+    pub fn button_was_pressed(&mut self) -> bool {
+        let button_held = self.button.is_high();
+        let result = button_held && !self.last_button_held;
+        self.last_button_held = button_held;
+        result
     }
 
+    /*
     pub fn fill_led_output_buf<F: FnMut(&mut [u8])>(&mut self, mut f: F) {
         self.i2s_transfer
             .push_with(|buf| {
@@ -227,6 +327,7 @@ impl Hardware<'_> {
             })
             .unwrap();
     }
+    */
 
     pub fn usb_power(&self) -> bool {
         self.vbus_sense.is_high()
@@ -237,10 +338,34 @@ impl Hardware<'_> {
     }
 
     pub fn read_batt_voltage(&mut self) -> u16 {
-        let vref = self.adc.read_blocking(self.vref);
-        let batt_measure = self.adc.read_blocking(self.batt_measure);
+        let vref = self.adc.read_blocking(&mut self.vref);
+        let batt_measure = self.adc.read_blocking(&mut self.batt_measure);
         println!("vref={:?}, batt_measure={:?}", vref, batt_measure);
         0
+    }
+
+    pub fn sleep(&mut self, duration: core::time::Duration) {
+        let timer = rtc_cntl::sleep::TimerWakeupSource::new(duration);
+        let gpio = rtc_cntl::sleep::GpioWakeupSource::new();
+
+        const DISABLE_SLEEP: bool = const {
+            match option_env!("FLOWSTICK_DISABLE_SLEEP") {
+                Some(x) => match x.as_bytes() {
+                    b"true" | b"1" => true,
+                    b"false" | b"0" => false,
+                    _ => panic!("FLOWSTICK_DISABLE_SLEEP must be a boolean value"),
+                },
+                None => false,
+            }
+        };
+
+        if DISABLE_SLEEP {
+            let target = self.rtc.time_since_boot()
+                + time::Duration::from_millis(duration.as_millis() as u64);
+            while self.rtc.time_since_boot() < target && !self.button.is_high() {}
+        } else {
+            self.rtc.sleep_light(&[&timer, &gpio]);
+        }
     }
 }
 
@@ -327,96 +452,165 @@ impl Anim {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-enum PowerState {
-    Off,
-    On,
-    UsbPower,
-}
-
-impl PowerState {
-    pub fn transition_to_on(&mut self, hardware: &mut Hardware, anim: &mut Anim) {
-        anim.image();
-
-        hardware.hold_power_on();
-        *self = PowerState::On;
-    }
-
-    pub fn transition_to_off(&mut self, hardware: &mut Hardware, anim: &mut Anim) {
-        anim.off();
-
-        hardware.release_power();
-        *self = PowerState::Off;
-    }
-
-    pub fn transition_to_usb_power(&mut self, hardware: &mut Hardware) {
-        hardware.release_power();
-        *self = PowerState::UsbPower;
+const I2S_TX_BUFFER_SIZE_BYTES: usize = FRAME_SIZE_BYTES * 64;
+fn i2s_tx_buffer() -> &'static mut [u8; I2S_TX_BUFFER_SIZE_BYTES] {
+    static mut I2S_TX_BUFFER: [u32; (I2S_TX_BUFFER_SIZE_BYTES + 3) / 4] =
+        [0_u32; (I2S_TX_BUFFER_SIZE_BYTES + 3) / 4];
+    #[allow(static_mut_refs)]
+    unsafe {
+        &mut *(I2S_TX_BUFFER.as_mut_ptr() as *mut [u8; I2S_TX_BUFFER_SIZE_BYTES])
     }
 }
 
-#[main]
-fn main() -> ! {
-    with_hardware(|mut hardware| {
-        let mut power_state = PowerState::Off;
-        let mut anim = Anim::Off;
-        let mut last_button_pressed = false;
+fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHardware) {
+    let mut led_driver = led_hardware.build_low_power();
 
-        loop {
-            let button_pressed = hardware.button_pressed();
-            let usb_power = hardware.usb_power();
-            let charging = hardware.charging();
+    let mut led_bytes = [0_u8; FRAME_SIZE_BYTES];
+    populate_frame_buffer(&mut led_bytes, |_| (0x00, 0x00, 0x00));
+    led_driver.write_bytes(&led_bytes); // Turn off LEDs
 
-            println!("Usb power: {}", usb_power);
-            println!("Charging: {}", charging);
-            hardware.read_batt_voltage();
+    let mut frame = 0;
 
-            // Handle state transitions
-            match power_state {
-                PowerState::Off => {
-                    if button_pressed && !last_button_pressed {
-                        power_state.transition_to_on(&mut hardware, &mut anim);
-                    } else if usb_power {
-                        power_state.transition_to_usb_power(&mut hardware);
-                    }
-                }
-                PowerState::On => {
-                    if button_pressed && !last_button_pressed {
-                        if usb_power {
-                            power_state.transition_to_usb_power(&mut hardware);
-                        } else {
-                            power_state.transition_to_off(&mut hardware, &mut anim);
-                        };
-                    }
-                }
-                PowerState::UsbPower => {
-                    if button_pressed && !last_button_pressed {
-                        power_state.transition_to_on(&mut hardware, &mut anim);
-                    } else if !usb_power {
-                        power_state.transition_to_off(&mut hardware, &mut anim);
-                    }
-                }
-            }
-            last_button_pressed = button_pressed;
-
-            // Handle current state
-            match power_state {
-                PowerState::Off => {}
-                PowerState::On => {}
-                PowerState::UsbPower => {
-                    if charging {
-                        anim.red_bar();
-                    } else {
-                        anim.green_bar();
-                    }
-                }
-            }
-
-            // Update output buffer with animation data
-            hardware.fill_led_output_buf(|buf| anim.populate_led_frame(buf));
+    loop {
+        if control_driver.button_was_pressed() {
+            return; // Power On
         }
-    })
+
+        let usb_power = control_driver.usb_power();
+        let charging = control_driver.charging();
+
+        // Charging animation
+        if usb_power {
+            if charging {
+                // Red
+                populate_frame_buffer(&mut led_bytes, |i| {
+                    if i == 0 && frame == 0 {
+                        (0xFF, 0x00, 0x00)
+                    } else {
+                        (0x00, 0x00, 0x00)
+                    }
+                });
+                frame = (frame + 1) % 2;
+            } else {
+                // Green
+                populate_frame_buffer(&mut led_bytes, |i| {
+                    if i == 0 {
+                        (0x00, 0xFF, 0x00)
+                    } else {
+                        (0x00, 0x00, 0x00)
+                    }
+                });
+            }
+        } else {
+            // Off
+            populate_frame_buffer(&mut led_bytes, |_| (0x00, 0x00, 0x00));
+        }
+        led_driver.write_bytes(&led_bytes);
+
+        control_driver.sleep(core::time::Duration::from_millis(500));
+    }
 }
+
+fn power_on_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHardware) {
+    control_driver.hold_power_on();
+    info!("Power on!");
+
+    let mut led_driver = led_hardware.build_high_power();
+    let mut led_dma = led_driver.begin_dma();
+
+    let mut anim = Anim::Plasma { offset: 0 };
+
+    loop {
+        if control_driver.button_was_pressed() {
+            control_driver.release_power();
+            info!("Power off, goodbye!");
+            return; // Power Off
+        }
+
+        // Animation
+        led_dma.feed(|buf| anim.populate_led_frame(buf));
+    }
+}
+
+#[esp_hal_embassy::main]
+async fn main(_spawner: embassy_executor::Spawner) -> ! {
+    let (mut control_driver, mut led_hardware) = init();
+
+    if control_driver.button_was_pressed() {
+        // Power-on happened due to button press
+        power_on_loop(&mut control_driver, &mut led_hardware); // Go straight to power on loop
+    } else {
+        // Power-on happened due to USB plug in
+        // 2 second period to allow debugger to be attached
+        delay::Delay::new().delay(time::Duration::from_millis(2000));
+    }
+
+    loop {
+        power_off_loop(&mut control_driver, &mut led_hardware);
+        power_on_loop(&mut control_driver, &mut led_hardware);
+    }
+}
+
+/*
+    let mut power_state = PowerState::Off;
+    let mut anim = Anim::Off;
+    let mut last_button_pressed = false;
+
+    loop {
+        let button_pressed = control_driver.button_was_pressed();
+        let usb_power = control_driver.usb_power();
+        let charging = control_driver.charging();
+
+        println!("Usb power: {}", usb_power);
+        println!("Charging: {}", charging);
+        control_driver.read_batt_voltage();
+
+        // Handle state transitions
+        match power_state {
+            PowerState::Off => {
+                if button_pressed && !last_button_pressed {
+                    power_state.transition_to_on(&mut control_driver, &mut anim);
+                } else if usb_power {
+                    power_state.transition_to_usb_power(&mut control_driver);
+                }
+            }
+            PowerState::On => {
+                if button_pressed && !last_button_pressed {
+                    if usb_power {
+                        power_state.transition_to_usb_power(&mut control_driver);
+                    } else {
+                        power_state.transition_to_off(&mut control_driver, &mut anim);
+                    };
+                }
+            }
+            PowerState::UsbPower => {
+                if button_pressed && !last_button_pressed {
+                    power_state.transition_to_on(&mut control_driver, &mut anim);
+                } else if !usb_power {
+                    power_state.transition_to_off(&mut control_driver, &mut anim);
+                }
+            }
+        }
+        last_button_pressed = button_pressed;
+
+        // Handle current state
+        match power_state {
+            PowerState::Off => {}
+            PowerState::On => {}
+            PowerState::UsbPower => {
+                if charging {
+                    anim.red_bar();
+                } else {
+                    anim.green_bar();
+                }
+            }
+        }
+
+        // Update output buffer with animation data
+        control_driver.fill_led_output_buf(|buf| anim.populate_led_frame(buf));
+    }
+}
+*/
 
 pub fn hsv2rgb(hsv: [u8; 3]) -> [u8; 3] {
     let [h, s, v] = hsv;
@@ -435,5 +629,24 @@ pub fn hsv2rgb(hsv: [u8; 3]) -> [u8; 3] {
         170..=212 => [t as u8, p as u8, v as u8],
         213..=254 => [v as u8, p as u8, q as u8],
         255 => [v as u8, t as u8, p as u8],
+    }
+}
+
+fn populate_frame_buffer<F: Fn(usize) -> (u8, u8, u8)>(buf: &mut [u8], f: F) {
+    let buf: &mut [u8; LED_DATA_LEADER_BYTES + 4 * LED_COUNT + LED_DATA_TRAILER_BYTES] =
+        buf.try_into().unwrap();
+
+    for i in 0..LED_DATA_LEADER_BYTES {
+        buf[i] = 0x00;
+    }
+    for i in 0..LED_COUNT {
+        let (r, g, b) = f(i);
+        buf[LED_DATA_LEADER_BYTES + 4 * i + 0] = 0xE1;
+        buf[LED_DATA_LEADER_BYTES + 4 * i + 1] = b;
+        buf[LED_DATA_LEADER_BYTES + 4 * i + 2] = g;
+        buf[LED_DATA_LEADER_BYTES + 4 * i + 3] = r;
+    }
+    for i in 0..LED_DATA_TRAILER_BYTES {
+        buf[LED_DATA_LEADER_BYTES + 4 * LED_COUNT + i] = 0xFF;
     }
 }

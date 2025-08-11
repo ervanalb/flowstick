@@ -1,0 +1,4 @@
+Hello, I would like the functionality of these LED strip boards tested at the factory, to ensure good soldering.
+
+Each panel has 2x headers for providing power and data to the APA102 LEDs.
+For functional test, please apply 5V and APA102 signal (SPI) to ensure all 40 LEDs light up. This test is performed twice per panel, left half and right half. All LEDs should light for the test to pass.
