@@ -14,6 +14,7 @@ use bleps::{
     ad_structure::{
         create_advertising_data, AdStructure, BR_EDR_NOT_SUPPORTED, LE_GENERAL_DISCOVERABLE,
     },
+    att::Uuid,
     attribute_server::AttributeServer,
     gatt, Ble, HciConnector,
 };
@@ -128,17 +129,53 @@ struct ControlDriver {
     last_button_held: bool,
 }
 
-struct UsbHardware {
-    usb: peripherals::USB_DEVICE<'static>,
+struct BleHardware {
+    timer: timer::timg::Timer<'static>,
+    rng: peripherals::RNG<'static>,
+    bt: peripherals::BT<'static>,
 }
 
-impl UsbHardware {
-    fn build_serial_jtag(&mut self) -> UsbSerialJtag<'_, Blocking> {
-        UsbSerialJtag::new(self.usb.reborrow())
+struct BleDriver<'d> {
+    ble: Ble<'d>,
+}
+
+impl BleHardware {
+    fn build_with<T, F: FnOnce(BleDriver<'_>) -> T>(&mut self, f: F) -> T {
+        let esp_wifi_ctrl =
+            esp_wifi::init(self.timer.reborrow(), rng::Rng::new(self.rng.reborrow())).unwrap();
+
+        let now = || time::Instant::now().duration_since_epoch().as_millis();
+        let connector = BleConnector::new(&esp_wifi_ctrl, self.bt.reborrow());
+        let hci = HciConnector::new(connector, now);
+        let mut ble = Ble::new(&hci);
+
+        ble.init().unwrap();
+
+        f(BleDriver { ble })
     }
 }
 
-fn init() -> (ControlDriver, LedHardware) {
+impl BleDriver<'_> {
+    pub fn advertise(&mut self) {
+        println!("{:?}", self.ble.cmd_set_le_advertising_parameters());
+        println!(
+            "{:?}",
+            self.ble.cmd_set_le_advertising_data(
+                create_advertising_data(&[
+                    AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
+                    AdStructure::ServiceUuids16(&[Uuid::Uuid16(0x1809)]),
+                    AdStructure::CompleteLocalName("Flowstick"),
+                ])
+                .unwrap()
+            )
+        );
+        println!("{:?}", self.ble.cmd_set_le_advertise_enable(true));
+
+        println!("started advertising");
+    }
+}
+
+fn init() -> (ControlDriver, LedHardware, BleHardware) {
     esp_alloc::heap_allocator!(size: 72 * 1024);
     let peripherals = esp_hal::init(esp_hal::Config::default());
     UsbSerialJtag::new(peripherals.USB_DEVICE);
@@ -295,6 +332,11 @@ fn init() -> (ControlDriver, LedHardware) {
             spi: peripherals.SPI3,
             i2s: peripherals.I2S0,
             dma: peripherals.DMA_CH0,
+        },
+        BleHardware {
+            timer: timg0.timer1,
+            rng: peripherals.RNG,
+            bt: peripherals.BT,
         },
     )
 }
@@ -507,38 +549,48 @@ fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHard
         }
         led_driver.write_bytes(&led_bytes);
 
-        control_driver.sleep(core::time::Duration::from_millis(500));
+        control_driver.sleep(core::time::Duration::from_millis(1000));
     }
 }
 
-fn power_on_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHardware) {
+fn power_on_loop(
+    control_driver: &mut ControlDriver,
+    led_hardware: &mut LedHardware,
+    ble_hardware: &mut BleHardware,
+) {
     control_driver.hold_power_on();
     info!("Power on!");
 
     let mut led_driver = led_hardware.build_high_power();
-    let mut led_dma = led_driver.begin_dma();
 
-    let mut anim = Anim::Plasma { offset: 0 };
+    ble_hardware.build_with(|mut ble_driver| {
+        ble_driver.advertise();
 
-    loop {
-        if control_driver.button_was_pressed() {
-            control_driver.release_power();
-            info!("Power off, goodbye!");
-            return; // Power Off
+        let mut led_dma = led_driver.begin_dma();
+
+        let mut anim = Anim::Plasma { offset: 0 };
+
+        loop {
+            if control_driver.button_was_pressed() {
+                control_driver.release_power();
+                info!("Power off, goodbye!");
+                return; // Power Off
+            }
+
+            // Animation
+            led_dma.feed(|buf| anim.populate_led_frame(buf));
         }
-
-        // Animation
-        led_dma.feed(|buf| anim.populate_led_frame(buf));
-    }
+    });
 }
 
 #[esp_hal_embassy::main]
 async fn main(_spawner: embassy_executor::Spawner) -> ! {
-    let (mut control_driver, mut led_hardware) = init();
+    let (mut control_driver, mut led_hardware, mut ble_hardware) = init();
 
     if control_driver.button_was_pressed() {
         // Power-on happened due to button press
-        power_on_loop(&mut control_driver, &mut led_hardware); // Go straight to power on loop
+        power_on_loop(&mut control_driver, &mut led_hardware, &mut ble_hardware);
+    // Go straight to power on loop
     } else {
         // Power-on happened due to USB plug in
         // 2 second period to allow debugger to be attached
@@ -547,70 +599,9 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
 
     loop {
         power_off_loop(&mut control_driver, &mut led_hardware);
-        power_on_loop(&mut control_driver, &mut led_hardware);
+        power_on_loop(&mut control_driver, &mut led_hardware, &mut ble_hardware);
     }
 }
-
-/*
-    let mut power_state = PowerState::Off;
-    let mut anim = Anim::Off;
-    let mut last_button_pressed = false;
-
-    loop {
-        let button_pressed = control_driver.button_was_pressed();
-        let usb_power = control_driver.usb_power();
-        let charging = control_driver.charging();
-
-        println!("Usb power: {}", usb_power);
-        println!("Charging: {}", charging);
-        control_driver.read_batt_voltage();
-
-        // Handle state transitions
-        match power_state {
-            PowerState::Off => {
-                if button_pressed && !last_button_pressed {
-                    power_state.transition_to_on(&mut control_driver, &mut anim);
-                } else if usb_power {
-                    power_state.transition_to_usb_power(&mut control_driver);
-                }
-            }
-            PowerState::On => {
-                if button_pressed && !last_button_pressed {
-                    if usb_power {
-                        power_state.transition_to_usb_power(&mut control_driver);
-                    } else {
-                        power_state.transition_to_off(&mut control_driver, &mut anim);
-                    };
-                }
-            }
-            PowerState::UsbPower => {
-                if button_pressed && !last_button_pressed {
-                    power_state.transition_to_on(&mut control_driver, &mut anim);
-                } else if !usb_power {
-                    power_state.transition_to_off(&mut control_driver, &mut anim);
-                }
-            }
-        }
-        last_button_pressed = button_pressed;
-
-        // Handle current state
-        match power_state {
-            PowerState::Off => {}
-            PowerState::On => {}
-            PowerState::UsbPower => {
-                if charging {
-                    anim.red_bar();
-                } else {
-                    anim.green_bar();
-                }
-            }
-        }
-
-        // Update output buffer with animation data
-        control_driver.fill_led_output_buf(|buf| anim.populate_led_frame(buf));
-    }
-}
-*/
 
 pub fn hsv2rgb(hsv: [u8; 3]) -> [u8; 3] {
     let [h, s, v] = hsv;
