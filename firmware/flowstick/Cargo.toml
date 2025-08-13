@@ -9,34 +9,39 @@ name = "flowstick"
 path = "./src/bin/main.rs"
 
 [dependencies]
-esp-bootloader-esp-idf = { version = "0.2.0", features = ["esp32s3"] }
-esp-hal                = { version = "=1.0.0-rc.0", features = ["esp32s3", "unstable"] }
-
-bleps = { git = "https://github.com/bjoernQ/bleps", package = "bleps", rev = "a5148d8ae679e021b78f53fd33afb8bb35d0b62e", features = [
-  "async",
-  "macros",
-] }
-critical-section = "1.2.0"
-embedded-io = "0.6.1"
-esp-alloc = "0.8.0"
-esp-wifi = { version = "0.15.0", features = [
-  "ble",
-  "builtin-scheduler",
-  "esp-alloc",
-  "esp32s3",
-] }
-esp-backtrace = { version = "0.16.0", features = [
-    "esp32s3",
-    "exception-handler",
+embassy-executor = { version = "0.7.0", features = ["task-arena-size-32768"] }
+embassy-futures = "0.1.1"
+embassy-time = "0.4"
+esp-bootloader-esp-idf = "0.2.0"
+esp-backtrace = { version = "0.17.0", features = [
     "panic-handler",
     "println",
-    "semihosting",  # Not technically correct but prevents USB serial/JTAG from being shut down on panic
-]}
-esp-println = { version = "0.14.0", features = ["esp32s3", "log-04"] }
+    "semihosting"
+] }
+esp-hal = { version = "1.0.0-rc.0", features = [ "unstable" ] }
+esp-hal-embassy = { version = "0.9.0", features = [ "log-04"] }
+esp-alloc = { version = "0.8.0" }
+esp-println = { version = "0.15.0", features = ["log-04"] }
+esp-radio = { version = "0.15.0", features = [ "unstable", "ble" ] }
+esp-radio-preempt-baremetal = { version = "0.0.1", features = ["log-04"] }
 log = "0.4.27"
-embassy-executor = "0.7.0"
-embassy-time = "0.4.0"
-esp-hal-embassy = { version = "0.9.0", features = ["esp32s3", "log-04"] }
+trouble-host = { version = "0.2.4", features = ["default-packet-pool-mtu-255", "scan"] }
+heapless = "0.8"
+
+[features]
+default = ["esp32s3"]
+esp32s3 = ["esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-hal-embassy/esp32s3", "esp-println/esp32s3", "esp-radio-preempt-baremetal/esp32s3", "esp-radio/esp32s3", "esp-bootloader-esp-idf/esp32s3"]
+
+[patch.crates-io]
+esp-radio = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
+esp-radio-preempt-baremetal = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
+esp-backtrace = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
+esp-hal = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
+esp-bootloader-esp-idf = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
+esp-hal-embassy = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
+esp-alloc = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
+esp-println = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
+trouble-host = {git = "https://github.com/embassy-rs/trouble.git", rev = "f9ce4724272951c2ebbed81910035996f4365a89"}
 
 [profile.dev]
 # Rust debug is too slow.

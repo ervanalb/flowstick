@@ -1,24 +1,23 @@
 #![no_std]
 #![no_main]
 
+use core::cell::RefCell;
+use embassy_futures::{
+    select::{select, Either},
+    yield_now,
+};
+use embassy_time::{Duration, Timer};
 use esp_alloc as _;
 use esp_backtrace as _;
 use esp_hal::{
-    analog, delay, dma, dma_circular_descriptors, gpio, i2s, peripherals, rng, rtc_cntl, spi, time,
+    analog, delay, dma, dma_circular_descriptors, gpio, i2s, peripherals, rtc_cntl, spi, time,
     timer, usb_serial_jtag::UsbSerialJtag, Blocking,
 };
 use esp_println::println;
-use log::info;
-
-use bleps::{
-    ad_structure::{
-        create_advertising_data, AdStructure, BR_EDR_NOT_SUPPORTED, LE_GENERAL_DISCOVERABLE,
-    },
-    att::Uuid,
-    attribute_server::AttributeServer,
-    gatt, Ble, HciConnector,
-};
-use esp_wifi::ble::controller::BleConnector;
+use esp_radio::ble::controller::BleConnector;
+use heapless::Deque;
+use log::{error, info};
+use trouble_host::prelude::*;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -26,6 +25,7 @@ pub const LED_COUNT: usize = 40;
 pub const LED_DATA_LEADER_BYTES: usize = 4;
 pub const LED_DATA_TRAILER_BYTES: usize = 4;
 pub const FRAME_SIZE_BYTES: usize = LED_DATA_LEADER_BYTES + 4 * LED_COUNT + LED_DATA_TRAILER_BYTES;
+pub const DMA_BUFFER_SIZE_FRAMES: usize = 120;
 
 pub const IMAGE_DATA: &[u8] = include_bytes!("../test.data");
 pub const IMAGE_DATA_FRAMES: usize = IMAGE_DATA.len() / (3 * 40);
@@ -41,23 +41,35 @@ struct LedDriverHighPower<'d> {
 impl<'a> LedDriverHighPower<'a> {
     fn begin_dma(&'a mut self) -> LedDma<'a> {
         let buf = i2s_tx_buffer();
-        buf.fill(0x00);
-        let i2s_transfer = self.i2s_tx.write_dma_circular(buf).unwrap();
+        let mut i2s_transfer = self.i2s_tx.write_dma_circular(buf).unwrap();
+
+        // Initial fill
+        i2s_transfer
+            .push_with(|buf| {
+                buf.fill(0x00);
+                buf.len()
+            })
+            .unwrap();
+
         LedDma { i2s_transfer }
     }
 }
 
 impl LedDma<'_> {
     pub fn feed<F: FnMut(&mut [u8])>(&mut self, mut f: F) {
-        self.i2s_transfer
-            .push_with(|buf| {
-                let frames = buf.len() / FRAME_SIZE_BYTES;
-                for i in 0..frames {
-                    f(&mut buf[i * FRAME_SIZE_BYTES..(i + 1) * FRAME_SIZE_BYTES]);
-                }
-                frames * FRAME_SIZE_BYTES
-            })
-            .unwrap();
+        let result = self.i2s_transfer.push_with(|buf| {
+            let frames = buf.len() / FRAME_SIZE_BYTES;
+            for i in 0..frames {
+                f(&mut buf[i * FRAME_SIZE_BYTES..(i + 1) * FRAME_SIZE_BYTES]);
+            }
+            frames * FRAME_SIZE_BYTES
+        });
+        match result {
+            Ok(_) => {}
+            Err(e) => {
+                error!("LED DMA error: {:?}", e)
+            }
+        }
     }
 }
 
@@ -90,7 +102,7 @@ impl LedHardware {
             self.dma.reborrow(),
         );
 
-        let (_, i2s_tx_descriptors) = dma_circular_descriptors!(FRAME_SIZE_BYTES * 64);
+        let (_, i2s_tx_descriptors) = dma_circular_descriptors!(FRAME_SIZE_BYTES * DMA_BUFFER_SIZE_FRAMES);
         let i2s_tx = i2s
             .i2s_tx
             .with_bclk(self.clk.reborrow())
@@ -130,48 +142,59 @@ struct ControlDriver {
 }
 
 struct BleHardware {
-    timer: timer::timg::Timer<'static>,
-    rng: peripherals::RNG<'static>,
     bt: peripherals::BT<'static>,
-}
-
-struct BleDriver<'d> {
-    ble: Ble<'d>,
+    radio: esp_radio::Controller<'static>,
 }
 
 impl BleHardware {
-    fn build_with<T, F: FnOnce(BleDriver<'_>) -> T>(&mut self, f: F) -> T {
-        let esp_wifi_ctrl =
-            esp_wifi::init(self.timer.reborrow(), rng::Rng::new(self.rng.reborrow())).unwrap();
+    async fn run(&mut self) {
+        let connector = BleConnector::new(&self.radio, self.bt.reborrow());
+        let controller: ExternalController<_, 20> = ExternalController::new(connector);
 
-        let now = || time::Instant::now().duration_since_epoch().as_millis();
-        let connector = BleConnector::new(&esp_wifi_ctrl, self.bt.reborrow());
-        let hci = HciConnector::new(connector, now);
-        let mut ble = Ble::new(&hci);
+        // XXX Temporary: fixed random MAC address
+        let address: Address = Address::random([0xff, 0x8f, 0x1b, 0x05, 0xe4, 0xff]);
+        info!("Our BT address = {}", address);
 
-        ble.init().unwrap();
+        const CONNECTIONS_MAX: usize = 1;
+        const L2CAP_CHANNELS_MAX: usize = 1;
 
-        f(BleDriver { ble })
+        let mut resources: HostResources<DefaultPacketPool, CONNECTIONS_MAX, L2CAP_CHANNELS_MAX> =
+            HostResources::new();
+        let stack = trouble_host::new(controller, &mut resources).set_random_address(address);
+
+        let Host {
+            central,
+            mut runner,
+            ..
+        } = stack.build();
+
+        // SCAN
+        let printer = Printer {};
+        let mut scanner = Scanner::new(central);
+        let result = select(runner.run_with_handler(&printer), async {
+            let mut config = ScanConfig::default();
+            config.active = true;
+            config.phys = PhySet::M1;
+            config.interval = Duration::from_millis(150);
+            config.window = Duration::from_millis(50);
+            let mut _session = scanner.scan(&config).await.unwrap();
+            // Scan forever
+            loop {
+                Timer::after(Duration::from_secs(1)).await;
+            }
+        })
+        .await;
+        panic!("Runner or infinite loop failed: {:?}", result);
     }
 }
 
-impl BleDriver<'_> {
-    pub fn advertise(&mut self) {
-        println!("{:?}", self.ble.cmd_set_le_advertising_parameters());
-        println!(
-            "{:?}",
-            self.ble.cmd_set_le_advertising_data(
-                create_advertising_data(&[
-                    AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-                    AdStructure::ServiceUuids16(&[Uuid::Uuid16(0x1809)]),
-                    AdStructure::CompleteLocalName("Flowstick"),
-                ])
-                .unwrap()
-            )
-        );
-        println!("{:?}", self.ble.cmd_set_le_advertise_enable(true));
+struct Printer {}
 
-        println!("started advertising");
+impl EventHandler for Printer {
+    fn on_adv_reports(&self, mut it: LeAdvReportsIter<'_>) {
+        while let Some(Ok(report)) = it.next() {
+            info!("heard: {:?}", report);
+        }
     }
 }
 
@@ -181,9 +204,12 @@ fn init() -> (ControlDriver, LedHardware, BleHardware) {
     UsbSerialJtag::new(peripherals.USB_DEVICE);
     esp_println::logger::init_logger_from_env();
 
-    // Embassy
     let timg0 = timer::timg::TimerGroup::new(peripherals.TIMG0);
-    esp_hal_embassy::init(timg0.timer0);
+    esp_radio_preempt_baremetal::init(timg0.timer0);
+
+    // Embassy
+    let systimer = esp_hal::timer::systimer::SystemTimer::new(peripherals.SYSTIMER);
+    esp_hal_embassy::init(systimer.alarm0);
 
     // Peripherals
     let pwrhld = gpio::Output::new(
@@ -312,6 +338,7 @@ fn init() -> (ControlDriver, LedHardware, BleHardware) {
     */
 
     let rtc = rtc_cntl::Rtc::new(peripherals.LPWR);
+    let radio = esp_radio::init().unwrap();
 
     (
         ControlDriver {
@@ -334,9 +361,8 @@ fn init() -> (ControlDriver, LedHardware, BleHardware) {
             dma: peripherals.DMA_CH0,
         },
         BleHardware {
-            timer: timg0.timer1,
-            rng: peripherals.RNG,
             bt: peripherals.BT,
+            radio,
         },
     )
 }
@@ -468,7 +494,7 @@ impl Anim {
             Anim::Plasma { offset } => {
                 for i in 0..LED_COUNT {
                     let [r, g, b] =
-                        hsv2rgb([((*offset >> 6) as u8).wrapping_add(i as u8), 255, 255]);
+                        hsv2rgb([((*offset >> 6) as u8).wrapping_add(i as u8), 255, 25]);
                     buf[LED_DATA_LEADER_BYTES + 4 * i + 0] = 0xE1;
                     buf[LED_DATA_LEADER_BYTES + 4 * i + 1] = g;
                     buf[LED_DATA_LEADER_BYTES + 4 * i + 2] = b;
@@ -494,7 +520,7 @@ impl Anim {
     }
 }
 
-const I2S_TX_BUFFER_SIZE_BYTES: usize = FRAME_SIZE_BYTES * 64;
+const I2S_TX_BUFFER_SIZE_BYTES: usize = FRAME_SIZE_BYTES * DMA_BUFFER_SIZE_FRAMES;
 fn i2s_tx_buffer() -> &'static mut [u8; I2S_TX_BUFFER_SIZE_BYTES] {
     static mut I2S_TX_BUFFER: [u32; (I2S_TX_BUFFER_SIZE_BYTES + 3) / 4] =
         [0_u32; (I2S_TX_BUFFER_SIZE_BYTES + 3) / 4];
@@ -553,7 +579,7 @@ fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHard
     }
 }
 
-fn power_on_loop(
+async fn power_on_loop(
     control_driver: &mut ControlDriver,
     led_hardware: &mut LedHardware,
     ble_hardware: &mut BleHardware,
@@ -563,9 +589,7 @@ fn power_on_loop(
 
     let mut led_driver = led_hardware.build_high_power();
 
-    ble_hardware.build_with(|mut ble_driver| {
-        ble_driver.advertise();
-
+    let result = select(ble_hardware.run(), async {
         let mut led_dma = led_driver.begin_dma();
 
         let mut anim = Anim::Plasma { offset: 0 };
@@ -579,8 +603,17 @@ fn power_on_loop(
 
             // Animation
             led_dma.feed(|buf| anim.populate_led_frame(buf));
+            yield_now().await;
         }
-    });
+    })
+    .await;
+
+    match result {
+        Either::First(_) => {
+            panic!("BLE error");
+        }
+        Either::Second(_) => {}
+    }
 }
 
 #[esp_hal_embassy::main]
@@ -589,7 +622,7 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
 
     if control_driver.button_was_pressed() {
         // Power-on happened due to button press
-        power_on_loop(&mut control_driver, &mut led_hardware, &mut ble_hardware);
+        power_on_loop(&mut control_driver, &mut led_hardware, &mut ble_hardware).await;
     // Go straight to power on loop
     } else {
         // Power-on happened due to USB plug in
@@ -599,7 +632,7 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
 
     loop {
         power_off_loop(&mut control_driver, &mut led_hardware);
-        power_on_loop(&mut control_driver, &mut led_hardware, &mut ble_hardware);
+        power_on_loop(&mut control_driver, &mut led_hardware, &mut ble_hardware).await;
     }
 }
 
