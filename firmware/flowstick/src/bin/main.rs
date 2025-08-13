@@ -102,7 +102,8 @@ impl LedHardware {
             self.dma.reborrow(),
         );
 
-        let (_, i2s_tx_descriptors) = dma_circular_descriptors!(FRAME_SIZE_BYTES * DMA_BUFFER_SIZE_FRAMES);
+        let (_, i2s_tx_descriptors) =
+            dma_circular_descriptors!(FRAME_SIZE_BYTES * DMA_BUFFER_SIZE_FRAMES);
         let i2s_tx = i2s
             .i2s_tx
             .with_bclk(self.clk.reborrow())
@@ -164,14 +165,40 @@ impl BleHardware {
 
         let Host {
             central,
+            mut peripheral,
             mut runner,
             ..
         } = stack.build();
 
-        // SCAN
+        let mut adv_data = [0; 31];
+        let len = AdStructure::encode_slice(
+            &[
+                AdStructure::CompleteLocalName(b"Flowstick"),
+                AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
+            ],
+            &mut adv_data[..],
+        )
+        .unwrap();
+
         let printer = Printer {};
         let mut scanner = Scanner::new(central);
         let result = select(runner.run_with_handler(&printer), async {
+            // Set up advertising
+            let mut params = AdvertisementParameters::default();
+            params.interval_min = Duration::from_millis(60);
+            params.interval_max = Duration::from_millis(120);
+            let _advertiser = peripheral
+                .advertise(
+                    &params,
+                    Advertisement::NonconnectableScannableUndirected {
+                        adv_data: &adv_data[..len],
+                        scan_data: &[],
+                    },
+                )
+                .await
+                .unwrap();
+
+            // Set up scan
             let mut config = ScanConfig::default();
             config.active = true;
             config.phys = PhySet::M1;
