@@ -170,33 +170,35 @@ impl BleHardware {
             ..
         } = stack.build();
 
-        let mut adv_data = [0; 31];
+        let mut adv_data = [0; 128];
         let len = AdStructure::encode_slice(
             &[
-                AdStructure::CompleteLocalName(b"Flowstick"),
                 AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
+                AdStructure::CompleteLocalName(
+                    b"Flowstick but its a very long name, much longer than 31 bytes",
+                ),
             ],
-            &mut adv_data[..],
+            &mut adv_data,
         )
         .unwrap();
+        let mut params = AdvertisementParameters::default();
+        params.interval_min = Duration::from_millis(60);
+        params.interval_max = Duration::from_millis(120);
+
+        let adv_set = &[AdvertisementSet {
+            data: Advertisement::ExtConnectableNonscannableUndirected {
+                adv_data: &adv_data[..len],
+            },
+            params,
+        }];
+
+        let handles = &mut AdvertisementSet::handles(adv_set);
 
         let printer = Printer {};
         let mut scanner = Scanner::new(central);
         let result = select(runner.run_with_handler(&printer), async {
             // Set up advertising
-            let mut params = AdvertisementParameters::default();
-            params.interval_min = Duration::from_millis(60);
-            params.interval_max = Duration::from_millis(120);
-            let _advertiser = peripheral
-                .advertise(
-                    &params,
-                    Advertisement::NonconnectableScannableUndirected {
-                        adv_data: &adv_data[..len],
-                        scan_data: &[],
-                    },
-                )
-                .await
-                .unwrap();
+            //let _advertiser = peripheral.advertise_ext(adv_set, handles).await.unwrap();
 
             // Set up scan
             let mut config = ScanConfig::default();
@@ -645,6 +647,17 @@ async fn power_on_loop(
 
 #[esp_hal_embassy::main]
 async fn main(_spawner: embassy_executor::Spawner) -> ! {
+    const FLOWSTICK_POWER_ON: bool = const {
+        match option_env!("FLOWSTICK_POWER_ON") {
+            Some(x) => match x.as_bytes() {
+                b"true" | b"1" => true,
+                b"false" | b"0" => false,
+                _ => panic!("FLOWSTICK_POWER_ON must be a boolean value"),
+            },
+            None => false,
+        }
+    };
+
     let (mut control_driver, mut led_hardware, mut ble_hardware) = init();
 
     if control_driver.button_was_pressed() {
@@ -655,6 +668,11 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
         // Power-on happened due to USB plug in
         // 2 second period to allow debugger to be attached
         delay::Delay::new().delay(time::Duration::from_millis(2000));
+
+        // See if we should power on immediately for debugging
+        if FLOWSTICK_POWER_ON {
+            power_on_loop(&mut control_driver, &mut led_hardware, &mut ble_hardware).await;
+        }
     }
 
     loop {
