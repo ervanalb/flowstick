@@ -2711,7 +2711,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 161.29 60.96 0)
 			(effects
 				(font
@@ -2801,7 +2801,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 161.29 124.46 0)
 			(effects
 				(font
@@ -2891,7 +2891,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 115.57 156.21 0)
 			(effects
 				(font
@@ -2981,7 +2981,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 191.77 156.21 0)
 			(effects
 				(font
@@ -3071,7 +3071,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 69.85 124.46 0)
 			(effects
 				(font
@@ -3161,7 +3161,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 130.81 156.21 0)
 			(effects
 				(font
@@ -3250,7 +3250,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 85.09 60.96 0)
 			(effects
 				(font
@@ -3340,7 +3340,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 176.53 124.46 0)
 			(effects
 				(font
@@ -3430,7 +3430,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 69.85 92.71 0)
 			(effects
 				(font
@@ -3520,7 +3520,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 130.81 92.71 0)
 			(effects
 				(font
@@ -3610,7 +3610,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 176.53 92.71 0)
 			(effects
 				(font
@@ -3700,7 +3700,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 115.57 92.71 0)
 			(effects
 				(font
@@ -3789,7 +3789,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 191.77 60.96 0)
 			(effects
 				(font
@@ -3950,7 +3950,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 161.29 156.21 0)
 			(effects
 				(font
@@ -4114,7 +4114,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 191.77 92.71 0)
 			(effects
 				(font
@@ -4275,7 +4275,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 146.05 92.71 0)
 			(effects
 				(font
@@ -4365,7 +4365,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 100.33 92.71 0)
 			(effects
 				(font
@@ -4455,7 +4455,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 176.53 156.21 0)
 			(effects
 				(font
@@ -4545,7 +4545,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 100.33 124.46 0)
 			(effects
 				(font
@@ -4635,7 +4635,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 85.09 124.46 0)
 			(effects
 				(font
@@ -4795,7 +4795,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 54.61 60.96 0)
 			(effects
 				(font
@@ -4885,7 +4885,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 54.61 124.46 0)
 			(effects
 				(font
@@ -4975,7 +4975,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 191.77 124.46 0)
 			(effects
 				(font
@@ -5064,7 +5064,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 146.05 60.96 0)
 			(effects
 				(font
@@ -5154,7 +5154,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 54.61 156.21 0)
 			(effects
 				(font
@@ -5243,7 +5243,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 69.85 60.96 0)
 			(effects
 				(font
@@ -5333,7 +5333,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 85.09 92.71 0)
 			(effects
 				(font
@@ -5423,7 +5423,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 69.85 156.21 0)
 			(effects
 				(font
@@ -5513,7 +5513,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 130.81 124.46 0)
 			(effects
 				(font
@@ -5603,7 +5603,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 54.61 92.71 0)
 			(effects
 				(font
@@ -5692,7 +5692,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 176.53 60.96 0)
 			(effects
 				(font
@@ -5856,7 +5856,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 146.05 156.21 0)
 			(effects
 				(font
@@ -6019,7 +6019,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 115.57 60.96 0)
 			(effects
 				(font
@@ -6109,7 +6109,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 146.05 124.46 0)
 			(effects
 				(font
@@ -6199,7 +6199,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 161.29 92.71 0)
 			(effects
 				(font
@@ -6289,7 +6289,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 115.57 124.46 0)
 			(effects
 				(font
@@ -6452,7 +6452,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 130.81 60.96 0)
 			(effects
 				(font
@@ -6541,7 +6541,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 100.33 60.96 0)
 			(effects
 				(font
@@ -6631,7 +6631,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 85.09 156.21 0)
 			(effects
 				(font
@@ -6721,7 +6721,7 @@
 				(hide yes)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED-APA102-2020"
+		(property "Footprint" "custom:LED-APA102-2020-6"
 			(at 100.33 156.21 0)
 			(effects
 				(font
