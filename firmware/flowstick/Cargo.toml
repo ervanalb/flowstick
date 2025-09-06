@@ -16,32 +16,34 @@ esp-bootloader-esp-idf = "0.2.0"
 esp-backtrace = { version = "0.17.0", features = [
     "panic-handler",
     "println",
-    "semihosting"
+    #"semihosting"
 ] }
 esp-hal = { version = "1.0.0-rc.0", features = [ "unstable" ] }
 esp-hal-embassy = { version = "0.9.0", features = [ "log-04"] }
 esp-alloc = { version = "0.8.0" }
 esp-println = { version = "0.15.0", features = ["log-04"] }
 esp-radio = { version = "0.15.0", features = [ "unstable", "ble" ] }
-esp-radio-preempt-baremetal = { version = "0.0.1", features = ["log-04"] }
+esp-preempt = { version = "0.0.1", features = ["log-04"] }
+esp-sync = { version = "0.0.0" }
 log = "0.4.27"
 trouble-host = { version = "0.2.4", features = ["default-packet-pool-mtu-255", "scan"] }
 heapless = "0.8"
 
 [features]
 default = ["esp32s3"]
-esp32s3 = ["esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-hal-embassy/esp32s3", "esp-println/esp32s3", "esp-radio-preempt-baremetal/esp32s3", "esp-radio/esp32s3", "esp-bootloader-esp-idf/esp32s3"]
+esp32s3 = ["esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-hal-embassy/esp32s3", "esp-println/esp32s3", "esp-preempt/esp32s3", "esp-radio/esp32s3", "esp-bootloader-esp-idf/esp32s3", "esp-sync/esp32s3"]
 
 [patch.crates-io]
-esp-radio = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
-esp-radio-preempt-baremetal = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
-esp-backtrace = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
-esp-hal = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
-esp-bootloader-esp-idf = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
-esp-hal-embassy = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
-esp-alloc = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
-esp-println = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
-trouble-host = {git = "https://github.com/embassy-rs/trouble.git", rev = "f9ce4724272951c2ebbed81910035996f4365a89"}
+esp-radio = {git = "https://github.com/esp-rs/esp-hal.git", rev = "5e131468429987b54d3b08e5c369bedeb33c983c"}
+esp-preempt = {git = "https://github.com/esp-rs/esp-hal.git", rev = "5e131468429987b54d3b08e5c369bedeb33c983c"}
+esp-backtrace = {git = "https://github.com/esp-rs/esp-hal.git", rev = "5e131468429987b54d3b08e5c369bedeb33c983c"}
+esp-hal = {git = "https://github.com/esp-rs/esp-hal.git", rev = "5e131468429987b54d3b08e5c369bedeb33c983c"}
+esp-bootloader-esp-idf = {git = "https://github.com/esp-rs/esp-hal.git", rev = "5e131468429987b54d3b08e5c369bedeb33c983c"}
+esp-hal-embassy = {git = "https://github.com/esp-rs/esp-hal.git", rev = "5e131468429987b54d3b08e5c369bedeb33c983c"}
+esp-alloc = {git = "https://github.com/esp-rs/esp-hal.git", rev = "5e131468429987b54d3b08e5c369bedeb33c983c"}
+esp-println = {git = "https://github.com/esp-rs/esp-hal.git", rev = "5e131468429987b54d3b08e5c369bedeb33c983c"}
+esp-sync = {git = "https://github.com/esp-rs/esp-hal.git", rev = "5e131468429987b54d3b08e5c369bedeb33c983c"}
+trouble-host = {git = "https://github.com/embassy-rs/trouble.git", rev = "b57bb1c32fa16d1f81a2b0123ec723c9da7defb4"}
 
 [profile.dev]
 # Rust debug is too slow.

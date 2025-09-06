@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 
-use core::cell::RefCell;
 use embassy_futures::{
     select::{select, Either},
     yield_now,
@@ -10,14 +9,18 @@ use embassy_time::{Duration, Timer};
 use esp_alloc as _;
 use esp_backtrace as _;
 use esp_hal::{
-    analog, delay, dma, dma_circular_descriptors, gpio, i2s, peripherals, rtc_cntl, spi, time,
-    timer, usb_serial_jtag::UsbSerialJtag, Blocking,
+    analog, clock, delay, dma, dma_buffers, gpio, i2s, peripherals, rtc_cntl, spi, system, time,
+    timer, usb_serial_jtag::UsbSerialJtag, Blocking, Config,
 };
 use esp_println::println;
 use esp_radio::ble::controller::BleConnector;
-use heapless::Deque;
 use log::{error, info};
 use trouble_host::prelude::*;
+
+#[cfg(target_arch = "riscv32")]
+use esp_hal::riscv::interrupt::free as interrupt_free;
+#[cfg(target_arch = "xtensa")]
+use esp_hal::xtensa_lx::interrupt::free as interrupt_free;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
@@ -30,18 +33,20 @@ pub const DMA_BUFFER_SIZE_FRAMES: usize = 120;
 pub const IMAGE_DATA: &[u8] = include_bytes!("../test.data");
 pub const IMAGE_DATA_FRAMES: usize = IMAGE_DATA.len() / (3 * 40);
 
+const I2S_TX_BUFFER_SIZE_BYTES: usize = FRAME_SIZE_BYTES * DMA_BUFFER_SIZE_FRAMES;
+
 struct LedDma<'d> {
     i2s_transfer: dma::DmaTransferTxCircular<'d, i2s::master::I2sTx<'d, Blocking>>,
 }
 
 struct LedDriverHighPower<'d> {
     i2s_tx: i2s::master::I2sTx<'d, Blocking>,
+    i2s_tx_buffer: &'static mut [u8; I2S_TX_BUFFER_SIZE_BYTES],
 }
 
 impl<'a> LedDriverHighPower<'a> {
     fn begin_dma(&'a mut self) -> LedDma<'a> {
-        let buf = i2s_tx_buffer();
-        let mut i2s_transfer = self.i2s_tx.write_dma_circular(buf).unwrap();
+        let mut i2s_transfer = self.i2s_tx.write_dma_circular(self.i2s_tx_buffer).unwrap();
 
         // Initial fill
         i2s_transfer
@@ -57,19 +62,34 @@ impl<'a> LedDriverHighPower<'a> {
 
 impl LedDma<'_> {
     pub fn feed<F: FnMut(&mut [u8])>(&mut self, mut f: F) {
-        let result = self.i2s_transfer.push_with(|buf| {
-            let frames = buf.len() / FRAME_SIZE_BYTES;
-            for i in 0..frames {
-                f(&mut buf[i * FRAME_SIZE_BYTES..(i + 1) * FRAME_SIZE_BYTES]);
-            }
-            frames * FRAME_SIZE_BYTES
-        });
+        //interrupt_free(|| {
+        let mut frame = [0_u8; FRAME_SIZE_BYTES];
+        let available = self.i2s_transfer.available().unwrap();
+        let frames = available / FRAME_SIZE_BYTES;
+        for _ in 0..frames {
+            f(&mut frame);
+            self.i2s_transfer.push(&frame).unwrap();
+        }
+        //});
+        /*
+        let result = self
+            .i2s_transfer
+            .push_with(|buf| {
+                let frames = buf.len() / FRAME_SIZE_BYTES;
+                for i in 0..frames {
+                    f(&mut buf[i * FRAME_SIZE_BYTES..(i + 1) * FRAME_SIZE_BYTES]);
+                }
+                println!("fill! available: {:?}, filled: {:?}", buf.len(), frames * FRAME_SIZE_BYTES);
+                frames * FRAME_SIZE_BYTES
+            })
+            .await;
         match result {
             Ok(_) => {}
             Err(e) => {
                 error!("LED DMA error: {:?}", e)
             }
         }
+        */
     }
 }
 
@@ -84,7 +104,7 @@ impl LedDriverLowPower<'_> {
 }
 
 pub struct LedHardware {
-    dat: peripherals::GPIO21<'static>,
+    dat: peripherals::GPIO17<'static>, // 21
     clk: peripherals::GPIO37<'static>,
     spi: peripherals::SPI3<'static>,
     i2s: peripherals::I2S0<'static>,
@@ -95,15 +115,18 @@ impl LedHardware {
     fn build_high_power(&mut self) -> LedDriverHighPower {
         let i2s = i2s::master::I2s::new(
             self.i2s.reborrow(),
-            i2s::master::Standard::Philips,
-            i2s::master::DataFormat::Data8Channel8,
-            time::Rate::from_hz(624999), // 5 MHz bit clock. There is a bug preventing use of
-            // 625000, but this gives the same clock register values
             self.dma.reborrow(),
-        );
+            i2s::master::Config::new_tdm_philips()
+                .with_sample_rate(
+                    time::Rate::from_hz(624999), // 5 MHz bit clock. There is a bug preventing use of
+                                                 // 625000, but this gives the same clock register values
+                )
+                .with_data_format(i2s::master::DataFormat::Data8Channel8),
+        )
+        .unwrap();
 
-        let (_, i2s_tx_descriptors) =
-            dma_circular_descriptors!(FRAME_SIZE_BYTES * DMA_BUFFER_SIZE_FRAMES);
+        let (i2s_tx_buffer, i2s_tx_descriptors, _, _) = dma_buffers!(I2S_TX_BUFFER_SIZE_BYTES, 0);
+
         let i2s_tx = i2s
             .i2s_tx
             .with_bclk(self.clk.reborrow())
@@ -111,7 +134,10 @@ impl LedHardware {
             .build(i2s_tx_descriptors); // There is currently no way to build a descriptor chain with chunk
                                         // size other than dma::CHUNK_SIZE
 
-        LedDriverHighPower { i2s_tx }
+        LedDriverHighPower {
+            i2s_tx,
+            i2s_tx_buffer,
+        }
     }
 
     fn build_low_power(&mut self) -> LedDriverLowPower {
@@ -136,8 +162,16 @@ struct ControlDriver {
     chg_sense: gpio::Input<'static>,
     imu_spi: spi::master::Spi<'static, Blocking>,
     adc: analog::adc::Adc<'static, peripherals::ADC1<'static>, Blocking>,
-    vref: analog::adc::AdcPin<peripherals::GPIO8<'static>, peripherals::ADC1<'static>>,
-    batt_measure: analog::adc::AdcPin<peripherals::GPIO9<'static>, peripherals::ADC1<'static>>,
+    vref: analog::adc::AdcPin<
+        peripherals::GPIO8<'static>,
+        peripherals::ADC1<'static>,
+        analog::adc::AdcCalBasic<peripherals::ADC1<'static>>,
+    >,
+    batt_measure: analog::adc::AdcPin<
+        peripherals::GPIO9<'static>,
+        peripherals::ADC1<'static>,
+        analog::adc::AdcCalBasic<peripherals::ADC1<'static>>,
+    >,
     rtc: rtc_cntl::Rtc<'static>,
     last_button_held: bool,
 }
@@ -149,6 +183,12 @@ struct BleHardware {
 
 impl BleHardware {
     async fn run(&mut self) {
+        // XXX disable BT
+        //loop {
+        //    Timer::after(Duration::from_millis(10)).await;
+        //}
+        // XXX end disable BT
+
         let connector = BleConnector::new(&self.radio, self.bt.reborrow());
         let controller: ExternalController<_, 20> = ExternalController::new(connector);
 
@@ -209,6 +249,7 @@ impl BleHardware {
             let mut _session = scanner.scan(&config).await.unwrap();
             // Scan forever
             loop {
+                println!("Last reason reason: {:?}", system::reset_reason()); // XXX
                 Timer::after(Duration::from_secs(1)).await;
             }
         })
@@ -229,12 +270,12 @@ impl EventHandler for Printer {
 
 fn init() -> (ControlDriver, LedHardware, BleHardware) {
     esp_alloc::heap_allocator!(size: 72 * 1024);
-    let peripherals = esp_hal::init(esp_hal::Config::default());
+    let peripherals = esp_hal::init(Config::default().with_cpu_clock(clock::CpuClock::max()));
     UsbSerialJtag::new(peripherals.USB_DEVICE);
     esp_println::logger::init_logger_from_env();
 
     let timg0 = timer::timg::TimerGroup::new(peripherals.TIMG0);
-    esp_radio_preempt_baremetal::init(timg0.timer0);
+    esp_preempt::init(timg0.timer0);
 
     // Embassy
     let systimer = esp_hal::timer::systimer::SystemTimer::new(peripherals.SYSTIMER);
@@ -284,8 +325,9 @@ fn init() -> (ControlDriver, LedHardware, BleHardware) {
 
     // ADC for battery
     let mut adc_config = analog::adc::AdcConfig::new();
-    let vref = adc_config.enable_pin(peripherals.GPIO8, analog::adc::Attenuation::_11dB);
-    let batt_measure = adc_config.enable_pin(peripherals.GPIO9, analog::adc::Attenuation::_11dB);
+    let vref = adc_config.enable_pin_with_cal(peripherals.GPIO8, analog::adc::Attenuation::_11dB);
+    let batt_measure =
+        adc_config.enable_pin_with_cal(peripherals.GPIO9, analog::adc::Attenuation::_11dB);
     let adc = analog::adc::Adc::new(peripherals.ADC1, adc_config);
 
     /*
@@ -383,7 +425,7 @@ fn init() -> (ControlDriver, LedHardware, BleHardware) {
             last_button_held: false,
         },
         LedHardware {
-            dat: peripherals.GPIO21,
+            dat: peripherals.GPIO17,
             clk: peripherals.GPIO37,
             spi: peripherals.SPI3,
             i2s: peripherals.I2S0,
@@ -437,7 +479,12 @@ impl ControlDriver {
     pub fn read_batt_voltage(&mut self) -> u16 {
         let vref = self.adc.read_blocking(&mut self.vref);
         let batt_measure = self.adc.read_blocking(&mut self.batt_measure);
-        println!("vref={:?}, batt_measure={:?}", vref, batt_measure);
+        println!(
+            "vref={:?}, batt_measure={:?}, voltage={:?}",
+            vref,
+            batt_measure,
+            batt_measure as f32 / vref as f32 * 1.65
+        );
         0
     }
 
@@ -523,7 +570,7 @@ impl Anim {
             Anim::Plasma { offset } => {
                 for i in 0..LED_COUNT {
                     let [r, g, b] =
-                        hsv2rgb([((*offset >> 6) as u8).wrapping_add(i as u8), 255, 25]);
+                        hsv2rgb([((*offset >> 5) as u8).wrapping_add(i as u8), 255, 25]);
                     buf[LED_DATA_LEADER_BYTES + 4 * i + 0] = 0xE1;
                     buf[LED_DATA_LEADER_BYTES + 4 * i + 1] = g;
                     buf[LED_DATA_LEADER_BYTES + 4 * i + 2] = b;
@@ -544,12 +591,12 @@ impl Anim {
             }
         }
         for i in 0..LED_DATA_TRAILER_BYTES {
-            buf[LED_DATA_LEADER_BYTES + 4 * LED_COUNT + i] = 0xFF;
+            buf[LED_DATA_LEADER_BYTES + 4 * LED_COUNT + i] = 0x00; // XXX 0xFF ?
         }
     }
 }
 
-const I2S_TX_BUFFER_SIZE_BYTES: usize = FRAME_SIZE_BYTES * DMA_BUFFER_SIZE_FRAMES;
+/*
 fn i2s_tx_buffer() -> &'static mut [u8; I2S_TX_BUFFER_SIZE_BYTES] {
     static mut I2S_TX_BUFFER: [u32; (I2S_TX_BUFFER_SIZE_BYTES + 3) / 4] =
         [0_u32; (I2S_TX_BUFFER_SIZE_BYTES + 3) / 4];
@@ -558,6 +605,7 @@ fn i2s_tx_buffer() -> &'static mut [u8; I2S_TX_BUFFER_SIZE_BYTES] {
         &mut *(I2S_TX_BUFFER.as_mut_ptr() as *mut [u8; I2S_TX_BUFFER_SIZE_BYTES])
     }
 }
+*/
 
 fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHardware) {
     let mut led_driver = led_hardware.build_low_power();
@@ -615,6 +663,7 @@ async fn power_on_loop(
 ) {
     control_driver.hold_power_on();
     info!("Power on!");
+    control_driver.read_batt_voltage();
 
     let mut led_driver = led_hardware.build_high_power();
 
