@@ -2,6 +2,7 @@
 #![no_main]
 
 use core::cell::RefCell;
+use core::hash::{BuildHasher, Hasher};
 use embassy_futures::{
     select::{select, Either},
     yield_now,
@@ -15,8 +16,7 @@ use esp_hal::{
 };
 use esp_println::println;
 use esp_radio::ble::controller::BleConnector;
-use heapless::Deque;
-use log::{error, info};
+use log::{debug, error, info};
 use trouble_host::prelude::*;
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -29,6 +29,108 @@ pub const DMA_BUFFER_SIZE_FRAMES: usize = 120;
 
 pub const IMAGE_DATA: &[u8] = include_bytes!("../test.data");
 pub const IMAGE_DATA_FRAMES: usize = IMAGE_DATA.len() / (3 * 40);
+
+const COMPANY_ID: u16 = 0xFFFF;
+const MY_ID: u16 = 0x218C;
+
+#[derive(Clone, Debug)]
+pub struct GroupState {
+    group_id: u16,
+    group_private_id: [u8; 16],
+    revision: u16,
+    pattern: u8,
+    hmac: [u8; 16],
+}
+
+impl PartialEq for GroupState {
+    fn eq(&self, other: &GroupState) -> bool {
+        self.revision == other.revision && self.pattern == other.pattern
+    }
+}
+impl Eq for GroupState {}
+
+impl GroupState {
+    fn hmac(group_id: u16, group_private_id: [u8; 16], revision: u16, pattern: u8) -> [u8; 16] {
+        let mut encoded = [0_u8; 32];
+
+        let length = bincode::encode_into_slice(
+            (group_id, group_private_id, revision, pattern),
+            &mut encoded,
+            bincode::config::standard(),
+        )
+        .unwrap();
+
+        let mut hasher = rs_shake128::Shake128State::<16>::default().build_hasher();
+        hasher.write(&encoded[..length]);
+        let mut result = [0_u8; 16];
+        result[0..8].copy_from_slice(&hasher.finish().to_le_bytes());
+        result[8..16].copy_from_slice(&hasher.finish().to_le_bytes());
+        result
+    }
+
+    pub fn new(group_id: u16, group_private_id: [u8; 16], revision: u16, pattern: u8) -> Self {
+        Self {
+            group_id,
+            group_private_id,
+            revision,
+            pattern,
+            hmac: Self::hmac(group_id, group_private_id, revision, pattern),
+        }
+    }
+
+    pub fn deserialize_merge(&mut self, data: &[u8]) {
+        // Validation checks
+        let ((group_id, revision, pattern, hmac), length) =
+            match bincode::decode_from_slice(data, bincode::config::standard()) {
+                Ok(fields) => fields,
+                Err(_) => {
+                    return;
+                }
+            };
+
+        if length != data.len() {
+            return;
+        }
+        if group_id != self.group_id {
+            return;
+        }
+        if (revision, pattern) <= (self.revision, self.pattern) {
+            return;
+        }
+
+        let computed_hmac = Self::hmac(group_id, self.group_private_id, revision, pattern);
+
+        if computed_hmac != hmac {
+            return;
+        }
+
+        // Assign new values
+        self.revision = revision;
+        self.pattern = pattern;
+        self.hmac = hmac;
+    }
+
+    pub fn update(&mut self, pattern: u8) {
+        self.revision = self.revision.saturating_add(1);
+        self.pattern = pattern;
+        self.hmac = Self::hmac(
+            self.group_id,
+            self.group_private_id,
+            self.revision,
+            self.pattern,
+        );
+    }
+
+    pub fn serialize(&self, data: &mut [u8]) -> usize {
+        let length = bincode::encode_into_slice(
+            (self.group_id, self.revision, self.pattern, self.hmac),
+            data,
+            bincode::config::standard(),
+        )
+        .unwrap();
+        length
+    }
+}
 
 struct LedDma<'d> {
     i2s_transfer: dma::DmaTransferTxCircular<'d, i2s::master::I2sTx<'d, Blocking>>,
@@ -140,6 +242,8 @@ struct ControlDriver {
     batt_measure: analog::adc::AdcPin<peripherals::GPIO9<'static>, peripherals::ADC1<'static>>,
     rtc: rtc_cntl::Rtc<'static>,
     last_button_held: bool,
+    button_press_timestamp: time::Instant,
+    button_longpress_active: bool,
 }
 
 struct BleHardware {
@@ -148,7 +252,7 @@ struct BleHardware {
 }
 
 impl BleHardware {
-    async fn run(&mut self) {
+    async fn run(&mut self, group_state: &RefCell<GroupState>) {
         let connector = BleConnector::new(&self.radio, self.bt.reborrow());
         let controller: ExternalController<_, 20> = ExternalController::new(connector);
 
@@ -171,16 +275,22 @@ impl BleHardware {
         } = stack.build();
 
         let mut adv_data = [0; 128];
-        let len = AdStructure::encode_slice(
-            &[
-                AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-                AdStructure::CompleteLocalName(
-                    b"Flowstick but its a very long name, much longer than 31 bytes",
-                ),
-            ],
-            &mut adv_data,
-        )
-        .unwrap();
+        let mut last_group_state = group_state.borrow().clone();
+        // Flags
+        adv_data[0..3].copy_from_slice(&[
+            0x02,
+            0x01,
+            LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED,
+        ]);
+        // Manufacturer-specific data
+        adv_data[3..5].copy_from_slice(&[0x00, 0xFF]);
+        adv_data[5..7].copy_from_slice(&COMPANY_ID.to_le_bytes());
+        adv_data[7..9].copy_from_slice(&MY_ID.to_le_bytes());
+        let len = last_group_state.serialize(&mut adv_data[9..]);
+        adv_data[3] = (len + 5) as u8;
+        // Overall advertisement length
+        let len = len + 9;
+
         let mut params = AdvertisementParameters::default();
         params.interval_min = Duration::from_millis(60);
         params.interval_max = Duration::from_millis(120);
@@ -194,11 +304,13 @@ impl BleHardware {
 
         let handles = &mut AdvertisementSet::handles(adv_set);
 
-        let printer = Printer {};
+        let adv_listener = AdvListener {
+            group_state: &group_state,
+        };
         let mut scanner = Scanner::new(central);
-        let result = select(runner.run_with_handler(&printer), async {
+        let result = select(runner.run_with_handler(&adv_listener), async move {
             // Set up advertising
-            //let _advertiser = peripheral.advertise_ext(adv_set, handles).await.unwrap();
+            let _advertiser = peripheral.advertise_ext(adv_set, handles).await.unwrap();
 
             // Set up scan
             let mut config = ScanConfig::default();
@@ -206,10 +318,36 @@ impl BleHardware {
             config.phys = PhySet::M1;
             config.interval = Duration::from_millis(150);
             config.window = Duration::from_millis(50);
-            let mut _session = scanner.scan(&config).await.unwrap();
+            let mut _session = scanner.scan_ext(&config).await.unwrap();
             // Scan forever
             loop {
-                Timer::after(Duration::from_secs(1)).await;
+                // See if we need to update the advertising data
+                if let Some(adv_set) = {
+                    let group_state_ref = group_state.borrow();
+                    (*group_state_ref != last_group_state).then(|| {
+                        last_group_state = group_state_ref.clone();
+                        drop(group_state_ref); // Don't allow borrow to persist into an .await
+                        let len = last_group_state.serialize(&mut adv_data[9..]);
+                        adv_data[3] = (len + 5) as u8;
+                        // Overall advertisement length
+                        let len = len + 9;
+
+                        debug!("Updating advertising data to: {:?}", &adv_data[..len]);
+
+                        [AdvertisementSet {
+                            data: Advertisement::ExtConnectableNonscannableUndirected {
+                                adv_data: &adv_data[..len],
+                            },
+                            params,
+                        }]
+                    })
+                } {
+                    peripheral
+                        .update_adv_data_ext(&adv_set, handles)
+                        .await
+                        .unwrap();
+                }
+                Timer::after(Duration::from_millis(10)).await;
             }
         })
         .await;
@@ -217,12 +355,29 @@ impl BleHardware {
     }
 }
 
-struct Printer {}
+struct AdvListener<'a> {
+    group_state: &'a RefCell<GroupState>,
+}
 
-impl EventHandler for Printer {
-    fn on_adv_reports(&self, mut it: LeAdvReportsIter<'_>) {
+impl<'a> EventHandler for AdvListener<'a> {
+    fn on_ext_adv_reports(&self, mut it: LeExtAdvReportsIter<'_>) {
         while let Some(Ok(report)) = it.next() {
-            info!("heard: {:?}", report);
+            for ad_structure in AdStructure::decode(report.data).flatten() {
+                match ad_structure {
+                    AdStructure::ManufacturerSpecificData {
+                        company_identifier,
+                        payload,
+                    } => {
+                        if company_identifier != COMPANY_ID || payload[0..2] != MY_ID.to_le_bytes()
+                        {
+                            continue;
+                        }
+                        let payload = &payload[2..];
+                        self.group_state.borrow_mut().deserialize_merge(payload);
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 }
@@ -381,6 +536,8 @@ fn init() -> (ControlDriver, LedHardware, BleHardware) {
             batt_measure,
             rtc,
             last_button_held: false,
+            button_press_timestamp: time::Instant::now(),
+            button_longpress_active: false,
         },
         LedHardware {
             dat: peripherals.GPIO21,
@@ -396,6 +553,12 @@ fn init() -> (ControlDriver, LedHardware, BleHardware) {
     )
 }
 
+pub enum ButtonEvent {
+    None,
+    ShortPress,
+    LongPress,
+}
+
 impl ControlDriver {
     pub fn hold_power_on(&mut self) {
         self.pwrhld.set_high();
@@ -405,11 +568,36 @@ impl ControlDriver {
         self.pwrhld.set_low();
     }
 
-    pub fn button_was_pressed(&mut self) -> bool {
+    pub fn button_poll(&mut self) -> (bool, ButtonEvent) {
         let button_held = self.button.is_high();
-        let result = button_held && !self.last_button_held;
+        let button_pressed = button_held && !self.last_button_held;
+        let button_released = !button_held && self.last_button_held;
+
+        let mut long_press = false;
+        if button_pressed {
+            self.button_press_timestamp = time::Instant::now();
+        } else if !self.button_longpress_active
+            && button_held
+            && self.button_press_timestamp.elapsed() > time::Duration::from_millis(1000)
+        {
+            long_press = true;
+            self.button_longpress_active = true;
+        }
+
+        let button_event = if long_press {
+            ButtonEvent::LongPress
+        } else if button_released && !self.button_longpress_active {
+            ButtonEvent::ShortPress
+        } else {
+            ButtonEvent::None
+        };
+
+        if !button_held {
+            self.button_longpress_active = false;
+        }
         self.last_button_held = button_held;
-        result
+
+        (button_held, button_event)
     }
 
     /*
@@ -443,7 +631,6 @@ impl ControlDriver {
 
     pub fn sleep(&mut self, duration: core::time::Duration) {
         let timer = rtc_cntl::sleep::TimerWakeupSource::new(duration);
-        let gpio = rtc_cntl::sleep::GpioWakeupSource::new();
 
         const DISABLE_SLEEP: bool = const {
             match option_env!("FLOWSTICK_DISABLE_SLEEP") {
@@ -459,9 +646,9 @@ impl ControlDriver {
         if DISABLE_SLEEP {
             let target = self.rtc.time_since_boot()
                 + time::Duration::from_millis(duration.as_millis() as u64);
-            while self.rtc.time_since_boot() < target && !self.button.is_high() {}
+            while self.rtc.time_since_boot() < target {}
         } else {
-            self.rtc.sleep_light(&[&timer, &gpio]);
+            self.rtc.sleep_light(&[&timer]);
         }
     }
 }
@@ -560,6 +747,8 @@ fn i2s_tx_buffer() -> &'static mut [u8; I2S_TX_BUFFER_SIZE_BYTES] {
 }
 
 fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHardware) {
+    info!("Power off!");
+
     let mut led_driver = led_hardware.build_low_power();
 
     let mut led_bytes = [0_u8; FRAME_SIZE_BYTES];
@@ -569,8 +758,19 @@ fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHard
     let mut frame = 0;
 
     loop {
-        if control_driver.button_was_pressed() {
-            return; // Power On
+        let (button_held, button_event) = control_driver.button_poll();
+        match button_event {
+            ButtonEvent::None => {}
+            ButtonEvent::ShortPress => {}
+            ButtonEvent::LongPress => {
+                return; // Power On
+            }
+        }
+
+        if button_held {
+            control_driver.hold_power_on();
+        } else {
+            control_driver.release_power();
         }
 
         let usb_power = control_driver.usb_power();
@@ -581,13 +781,13 @@ fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHard
             if charging {
                 // Red
                 populate_frame_buffer(&mut led_bytes, |i| {
-                    if i == 0 && frame == 0 {
+                    if i == 0 && (frame & (1 << 4)) == 0 {
                         (0xFF, 0x00, 0x00)
                     } else {
                         (0x00, 0x00, 0x00)
                     }
                 });
-                frame = (frame + 1) % 2;
+                frame = (frame + 1) & ((1 << 5) - 1);
             } else {
                 // Green
                 populate_frame_buffer(&mut led_bytes, |i| {
@@ -604,7 +804,7 @@ fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHard
         }
         led_driver.write_bytes(&led_bytes);
 
-        control_driver.sleep(core::time::Duration::from_millis(1000));
+        control_driver.sleep(core::time::Duration::from_millis(80));
     }
 }
 
@@ -618,16 +818,51 @@ async fn power_on_loop(
 
     let mut led_driver = led_hardware.build_high_power();
 
-    let result = select(ble_hardware.run(), async {
+    let group_state = RefCell::new(GroupState::new(
+        0x0001,
+        [
+            0xAB, 0xCD, 0x12, 0x34, 0xAB, 0xCD, 0x12, 0x34, 0xAB, 0xCD, 0x12, 0x34, 0xAB, 0xCD,
+            0x12, 0x34,
+        ],
+        0,
+        0,
+    ));
+
+    let result = select(ble_hardware.run(&group_state), async {
         let mut led_dma = led_driver.begin_dma();
+
+        const PATTERN_COUNT: u8 = 10;
+        let mut pattern = 0;
 
         let mut anim = Anim::Plasma { offset: 0 };
 
         loop {
-            if control_driver.button_was_pressed() {
-                control_driver.release_power();
-                info!("Power off, goodbye!");
-                return; // Power Off
+            // State sync
+            {
+                let group_state = group_state.borrow();
+                if group_state.pattern != pattern && group_state.pattern < PATTERN_COUNT {
+                    pattern = group_state.pattern;
+                    info!("Sync pattern to {:?}", pattern);
+                }
+            }
+
+            // User input
+            let (_, button_event) = control_driver.button_poll();
+            match button_event {
+                ButtonEvent::None => {}
+                ButtonEvent::ShortPress => {
+                    pattern = (pattern + 1) % PATTERN_COUNT;
+                    {
+                        let mut group_state = group_state.borrow_mut();
+                        group_state.update(pattern);
+                    }
+                    info!("Advance pattern to {:?}", pattern);
+                }
+                ButtonEvent::LongPress => {
+                    control_driver.release_power();
+                    info!("Power off, goodbye!");
+                    return; // Power Off
+                }
             }
 
             // Animation
@@ -660,7 +895,10 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
 
     let (mut control_driver, mut led_hardware, mut ble_hardware) = init();
 
-    if control_driver.button_was_pressed() {
+    /*
+    let (button_held, _) = control_driver.button_poll();
+    // TODO require long-press to turn on
+    if button_held {
         // Power-on happened due to button press
         power_on_loop(&mut control_driver, &mut led_hardware, &mut ble_hardware).await;
     // Go straight to power on loop
@@ -674,7 +912,18 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
             power_on_loop(&mut control_driver, &mut led_hardware, &mut ble_hardware).await;
         }
     }
+    */
 
+    let (button_held, _) = control_driver.button_poll();
+    if !button_held {
+        // Power-on happened due to USB plug in
+        // 2 second period to allow debugger to be attached
+        delay::Delay::new().delay(time::Duration::from_millis(2000));
+
+        if FLOWSTICK_POWER_ON {
+            power_on_loop(&mut control_driver, &mut led_hardware, &mut ble_hardware).await;
+        }
+    }
     loop {
         power_off_loop(&mut control_driver, &mut led_hardware);
         power_on_loop(&mut control_driver, &mut led_hardware, &mut ble_hardware).await;
