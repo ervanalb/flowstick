@@ -27,8 +27,19 @@ pub const LED_DATA_TRAILER_BYTES: usize = 4;
 pub const FRAME_SIZE_BYTES: usize = LED_DATA_LEADER_BYTES + 4 * LED_COUNT + LED_DATA_TRAILER_BYTES;
 pub const DMA_BUFFER_SIZE_FRAMES: usize = 120;
 
+const PATTERNS: [PatternData; 2] = [
+    // Test
+    PatternData {
+        texture: include_bytes!("../test.data"),
+    },
+    // Nyancat
+    PatternData {
+        texture: include_bytes!("../nyancat.data"),
+    },
+];
+const PATTERN_COUNT: u8 = PATTERNS.len() as u8;
+
 pub const IMAGE_DATA: &[u8] = include_bytes!("../test.data");
-pub const IMAGE_DATA_FRAMES: usize = IMAGE_DATA.len() / (3 * 40);
 
 const COMPANY_ID: u16 = 0xFFFF;
 const MY_ID: u16 = 0x218C;
@@ -274,7 +285,7 @@ impl BleHardware {
             ..
         } = stack.build();
 
-        let mut adv_data = [0; 128];
+        let mut adv_data = [0; 64];
         let mut last_group_state = group_state.borrow().clone();
         // Flags
         adv_data[0..3].copy_from_slice(&[
@@ -443,84 +454,6 @@ fn init() -> (ControlDriver, LedHardware, BleHardware) {
     let batt_measure = adc_config.enable_pin(peripherals.GPIO9, analog::adc::Attenuation::_11dB);
     let adc = analog::adc::Adc::new(peripherals.ADC1, adc_config);
 
-    /*
-    // Bluetooth
-    let timg0 = timer::timg::TimerGroup::new(peripherals.TIMG0);
-    let esp_wifi_ctrl = esp_wifi::init(timg0.timer0, rng::Rng::new(peripherals.RNG)).unwrap();
-    let mut bluetooth = peripherals.BT;
-
-    let now = || time::Instant::now().duration_since_epoch().as_millis();
-    loop {
-        let connector = BleConnector::new(&esp_wifi_ctrl, bluetooth.reborrow());
-        let hci = HciConnector::new(connector, now);
-        let mut ble = Ble::new(&hci);
-
-        println!("{:?}", ble.init());
-        println!("{:?}", ble.cmd_set_le_advertising_parameters());
-        println!(
-            "{:?}",
-            ble.cmd_set_le_advertising_data(
-                create_advertising_data(&[
-                    AdStructure::Flags(LE_GENERAL_DISCOVERABLE | BR_EDR_NOT_SUPPORTED),
-                    AdStructure::ServiceUuids16(&[Uuid::Uuid16(0x1809)]),
-                    AdStructure::CompleteLocalName("Flowstick"),
-                ])
-                .unwrap()
-            )
-        );
-        println!("{:?}", ble.cmd_set_le_advertise_enable(true));
-
-        println!("started advertising");
-
-        let mut rf = |_offset: usize, data: &mut [u8]| {
-            data[..20].copy_from_slice(&b"Hello Bare-Metal BLE"[..]);
-            17
-        };
-        let mut wf = |offset: usize, data: &[u8]| {
-            println!("RECEIVED: {} {:?}", offset, data);
-        };
-
-        let mut wf2 = |offset: usize, data: &[u8]| {
-            println!("RECEIVED: {} {:?}", offset, data);
-        };
-
-        let mut rf3 = |_offset: usize, data: &mut [u8]| {
-            data[..5].copy_from_slice(&b"Hola!"[..]);
-            5
-        };
-        let mut wf3 = |offset: usize, data: &[u8]| {
-            println!("RECEIVED: Offset {}, data {:?}", offset, data);
-        };
-
-        gatt!([service {
-            uuid: "937312e0-2354-11eb-9f10-fbc30a62cf38",
-            characteristics: [
-                characteristic {
-                    uuid: "937312e0-2354-11eb-9f10-fbc30a62cf38",
-                    read: rf,
-                    write: wf,
-                },
-                characteristic {
-                    uuid: "957312e0-2354-11eb-9f10-fbc30a62cf38",
-                    write: wf2,
-                },
-                characteristic {
-                    name: "my_characteristic",
-                    uuid: "987312e0-2354-11eb-9f10-fbc30a62cf38",
-                    notify: true,
-                    read: rf3,
-                    write: wf3,
-                },
-            ],
-        },]);
-
-        let mut rng = bleps::no_rng::NoRng;
-        let mut srv = AttributeServer::new(&mut ble, &mut gatt_attributes, &mut rng);
-
-        loop {}
-    }
-    */
-
     let rtc = rtc_cntl::Rtc::new(peripherals.LPWR);
     let radio = esp_radio::init().unwrap();
 
@@ -600,20 +533,6 @@ impl ControlDriver {
         (button_held, button_event)
     }
 
-    /*
-    pub fn fill_led_output_buf<F: FnMut(&mut [u8])>(&mut self, mut f: F) {
-        self.i2s_transfer
-            .push_with(|buf| {
-                let frames = buf.len() / FRAME_SIZE_BYTES;
-                for i in 0..frames {
-                    f(&mut buf[i * FRAME_SIZE_BYTES..(i + 1) * FRAME_SIZE_BYTES]);
-                }
-                frames * FRAME_SIZE_BYTES
-            })
-            .unwrap();
-    }
-    */
-
     pub fn usb_power(&self) -> bool {
         self.vbus_sense.is_high()
     }
@@ -653,82 +572,34 @@ impl ControlDriver {
     }
 }
 
-#[derive(Clone, Debug)]
-pub enum Anim {
-    Off,
-    RedBar,
-    GreenBar,
-    Plasma { offset: u16 },
-    Image { frame: usize },
+pub struct PatternData {
+    pub texture: &'static [u8],
 }
 
-impl Anim {
-    pub fn off(&mut self) {
-        *self = Anim::Off;
+pub struct PatternState {
+    pub frame: usize,
+}
+
+impl PatternData {
+    pub fn initial_state(&self) -> PatternState {
+        PatternState { frame: 0 }
     }
-    pub fn red_bar(&mut self) {
-        *self = Anim::RedBar;
-    }
-    pub fn green_bar(&mut self) {
-        *self = Anim::GreenBar;
-    }
-    pub fn plasma(&mut self) {
-        *self = Anim::Plasma { offset: 0 };
-    }
-    pub fn image(&mut self) {
-        *self = Anim::Image { frame: 0 };
-    }
-    pub fn populate_led_frame(&mut self, buf: &mut [u8]) {
+
+    pub fn populate_led_frame(&self, state: &mut PatternState, buf: &mut [u8]) {
         for i in 0..LED_DATA_LEADER_BYTES {
             buf[i] = 0x00;
         }
-        match self {
-            Anim::Off => {
-                for i in 0..LED_COUNT {
-                    buf[LED_DATA_LEADER_BYTES + 4 * i + 0] = 0xE1;
-                    buf[LED_DATA_LEADER_BYTES + 4 * i + 1] = 0x00;
-                    buf[LED_DATA_LEADER_BYTES + 4 * i + 2] = 0x00;
-                    buf[LED_DATA_LEADER_BYTES + 4 * i + 3] = 0x00;
-                }
-            }
-            Anim::RedBar => {
-                for i in 0..LED_COUNT {
-                    buf[LED_DATA_LEADER_BYTES + 4 * i + 0] = 0xE1;
-                    buf[LED_DATA_LEADER_BYTES + 4 * i + 1] = 0x00;
-                    buf[LED_DATA_LEADER_BYTES + 4 * i + 2] = 0x00;
-                    buf[LED_DATA_LEADER_BYTES + 4 * i + 3] = 0xFF;
-                }
-            }
-            Anim::GreenBar => {
-                for i in 0..LED_COUNT {
-                    buf[LED_DATA_LEADER_BYTES + 4 * i + 0] = 0xE1;
-                    buf[LED_DATA_LEADER_BYTES + 4 * i + 1] = 0xFF;
-                    buf[LED_DATA_LEADER_BYTES + 4 * i + 2] = 0x00;
-                    buf[LED_DATA_LEADER_BYTES + 4 * i + 3] = 0x00;
-                }
-            }
-            Anim::Plasma { offset } => {
-                for i in 0..LED_COUNT {
-                    let [r, g, b] =
-                        hsv2rgb([((*offset >> 6) as u8).wrapping_add(i as u8), 255, 25]);
-                    buf[LED_DATA_LEADER_BYTES + 4 * i + 0] = 0xE1;
-                    buf[LED_DATA_LEADER_BYTES + 4 * i + 1] = g;
-                    buf[LED_DATA_LEADER_BYTES + 4 * i + 2] = b;
-                    buf[LED_DATA_LEADER_BYTES + 4 * i + 3] = r;
-                }
-                *offset = offset.wrapping_add(1);
-            }
-            Anim::Image { frame } => {
-                let image_data_frame =
-                    &IMAGE_DATA[*frame * 3 * LED_COUNT..(*frame + 1) * 3 * LED_COUNT];
-                for i in 0..LED_COUNT {
-                    buf[LED_DATA_LEADER_BYTES + 4 * i + 0] = 0xE1;
-                    buf[LED_DATA_LEADER_BYTES + 4 * i + 1] = image_data_frame[3 * i + 2];
-                    buf[LED_DATA_LEADER_BYTES + 4 * i + 2] = image_data_frame[3 * i + 1];
-                    buf[LED_DATA_LEADER_BYTES + 4 * i + 3] = image_data_frame[3 * i + 0];
-                }
-                *frame = (*frame + 1) % IMAGE_DATA_FRAMES;
-            }
+        let image_data_frame =
+            &self.texture[state.frame * 3 * LED_COUNT..(state.frame + 1) * 3 * LED_COUNT];
+        for i in 0..LED_COUNT {
+            buf[LED_DATA_LEADER_BYTES + 4 * i + 0] = 0xE1;
+            buf[LED_DATA_LEADER_BYTES + 4 * i + 1] = image_data_frame[3 * i + 2];
+            buf[LED_DATA_LEADER_BYTES + 4 * i + 2] = image_data_frame[3 * i + 1];
+            buf[LED_DATA_LEADER_BYTES + 4 * i + 3] = image_data_frame[3 * i + 0];
+        }
+        state.frame += 1;
+        if (state.frame + 1) * 3 * LED_COUNT > self.texture.len() {
+            state.frame = 0;
         }
         for i in 0..LED_DATA_TRAILER_BYTES {
             buf[LED_DATA_LEADER_BYTES + 4 * LED_COUNT + i] = 0xFF;
@@ -829,20 +700,25 @@ async fn power_on_loop(
     ));
 
     let result = select(ble_hardware.run(&group_state), async {
+        // Give 100ms or so for BT to initialize, which is very CPU-intensive,
+        // to avoid late DMA feeding
+        Timer::after(Duration::from_millis(100)).await;
+
         let mut led_dma = led_driver.begin_dma();
 
-        const PATTERN_COUNT: u8 = 10;
-        let mut pattern = 0;
-
-        let mut anim = Anim::Plasma { offset: 0 };
+        let mut pattern_ix = 0_u8;
+        let mut pattern = &PATTERNS[pattern_ix as usize];
+        let mut pattern_state = pattern.initial_state();
 
         loop {
+            let mut new_pattern = false;
             // State sync
             {
                 let group_state = group_state.borrow();
-                if group_state.pattern != pattern && group_state.pattern < PATTERN_COUNT {
-                    pattern = group_state.pattern;
-                    info!("Sync pattern to {:?}", pattern);
+                if group_state.pattern != pattern_ix && group_state.pattern < PATTERN_COUNT {
+                    pattern_ix = group_state.pattern;
+                    new_pattern = true;
+                    info!("Sync pattern to {:?}", pattern_ix);
                 }
             }
 
@@ -851,12 +727,13 @@ async fn power_on_loop(
             match button_event {
                 ButtonEvent::None => {}
                 ButtonEvent::ShortPress => {
-                    pattern = (pattern + 1) % PATTERN_COUNT;
+                    pattern_ix = (pattern_ix + 1) % PATTERN_COUNT;
                     {
                         let mut group_state = group_state.borrow_mut();
-                        group_state.update(pattern);
+                        group_state.update(pattern_ix);
                     }
-                    info!("Advance pattern to {:?}", pattern);
+                    new_pattern = true;
+                    info!("Advance pattern to {:?}", pattern_ix);
                 }
                 ButtonEvent::LongPress => {
                     control_driver.release_power();
@@ -865,8 +742,13 @@ async fn power_on_loop(
                 }
             }
 
+            if new_pattern {
+                pattern = &PATTERNS[pattern_ix as usize];
+                pattern_state = pattern.initial_state();
+            }
+
             // Animation
-            led_dma.feed(|buf| anim.populate_led_frame(buf));
+            led_dma.feed(|buf| pattern.populate_led_frame(&mut pattern_state, buf));
             yield_now().await;
         }
     })
@@ -894,25 +776,6 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
     };
 
     let (mut control_driver, mut led_hardware, mut ble_hardware) = init();
-
-    /*
-    let (button_held, _) = control_driver.button_poll();
-    // TODO require long-press to turn on
-    if button_held {
-        // Power-on happened due to button press
-        power_on_loop(&mut control_driver, &mut led_hardware, &mut ble_hardware).await;
-    // Go straight to power on loop
-    } else {
-        // Power-on happened due to USB plug in
-        // 2 second period to allow debugger to be attached
-        delay::Delay::new().delay(time::Duration::from_millis(2000));
-
-        // See if we should power on immediately for debugging
-        if FLOWSTICK_POWER_ON {
-            power_on_loop(&mut control_driver, &mut led_hardware, &mut ble_hardware).await;
-        }
-    }
-    */
 
     let (button_held, _) = control_driver.button_poll();
     if !button_held {
