@@ -27,16 +27,7 @@ pub const LED_DATA_TRAILER_BYTES: usize = 4;
 pub const FRAME_SIZE_BYTES: usize = LED_DATA_LEADER_BYTES + 4 * LED_COUNT + LED_DATA_TRAILER_BYTES;
 pub const DMA_BUFFER_SIZE_FRAMES: usize = 120;
 
-const PATTERNS: [PatternData; 2] = [
-    // Test
-    PatternData {
-        texture: include_bytes!("../test.data"),
-    },
-    // Nyancat
-    PatternData {
-        texture: include_bytes!("../nyancat.data"),
-    },
-];
+include!(concat!(env!("OUT_DIR"), "/patterns.rs"));
 const PATTERN_COUNT: u8 = PATTERNS.len() as u8;
 
 pub const IMAGE_DATA: &[u8] = include_bytes!("../test.data");

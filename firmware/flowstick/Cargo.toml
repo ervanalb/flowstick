@@ -45,6 +45,9 @@ esp-alloc = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2af
 esp-println = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
 trouble-host = {git = "https://github.com/embassy-rs/trouble.git", rev = "f9ce4724272951c2ebbed81910035996f4365a89"}
 
+[build-dependencies]
+png = "0.18.0"
+
 [profile.dev]
 # Rust debug is too slow.
 # For debug builds always builds with some optimization
