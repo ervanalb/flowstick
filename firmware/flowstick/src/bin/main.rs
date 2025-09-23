@@ -16,7 +16,6 @@ use esp_hal::{
 };
 use esp_println::println;
 use esp_radio::ble::controller::BleConnector;
-use log::{debug, error, info};
 use trouble_host::prelude::*;
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -171,7 +170,7 @@ impl LedDma<'_> {
         match result {
             Ok(_) => {}
             Err(e) => {
-                error!("LED DMA error: {:?}", e)
+                println!("LED DMA error: {:?}", e)
             }
         }
     }
@@ -244,7 +243,7 @@ struct ControlDriver {
     batt_measure: analog::adc::AdcPin<peripherals::GPIO9<'static>, peripherals::ADC1<'static>>,
     rtc: rtc_cntl::Rtc<'static>,
     last_button_held: bool,
-    button_press_timestamp: time::Instant,
+    button_press_timestamp: time::Duration,
     button_longpress_active: bool,
 }
 
@@ -260,7 +259,7 @@ impl BleHardware {
 
         // XXX Temporary: fixed random MAC address
         let address: Address = Address::random([0xff, 0x8f, 0x1b, 0x05, 0xe4, 0xff]);
-        info!("Our BT address = {}", address);
+        println!("Our BT address = {}", address);
 
         const CONNECTIONS_MAX: usize = 1;
         const L2CAP_CHANNELS_MAX: usize = 1;
@@ -334,7 +333,7 @@ impl BleHardware {
                         // Overall advertisement length
                         let len = len + 9;
 
-                        debug!("Updating advertising data to: {:?}", &adv_data[..len]);
+                        println!("Updating advertising data to: {:?}", &adv_data[..len]);
 
                         [AdvertisementSet {
                             data: Advertisement::ExtConnectableNonscannableUndirected {
@@ -388,7 +387,6 @@ fn init() -> (ControlDriver, LedHardware, BleHardware) {
     esp_alloc::heap_allocator!(size: 72 * 1024);
     let peripherals = esp_hal::init(esp_hal::Config::default());
     UsbSerialJtag::new(peripherals.USB_DEVICE);
-    esp_println::logger::init_logger_from_env();
 
     let timg0 = timer::timg::TimerGroup::new(peripherals.TIMG0);
     esp_radio_preempt_baremetal::init(timg0.timer0);
@@ -448,6 +446,7 @@ fn init() -> (ControlDriver, LedHardware, BleHardware) {
     let rtc = rtc_cntl::Rtc::new(peripherals.LPWR);
     let radio = esp_radio::init().unwrap();
 
+    let button_press_timestamp = rtc.time_since_boot();
     (
         ControlDriver {
             pwrhld,
@@ -460,7 +459,7 @@ fn init() -> (ControlDriver, LedHardware, BleHardware) {
             batt_measure,
             rtc,
             last_button_held: false,
-            button_press_timestamp: time::Instant::now(),
+            button_press_timestamp,
             button_longpress_active: false,
         },
         LedHardware {
@@ -493,16 +492,18 @@ impl ControlDriver {
     }
 
     pub fn button_poll(&mut self) -> (bool, ButtonEvent) {
+        let now = self.rtc.time_since_boot();
+
         let button_held = self.button.is_high();
         let button_pressed = button_held && !self.last_button_held;
         let button_released = !button_held && self.last_button_held;
 
         let mut long_press = false;
         if button_pressed {
-            self.button_press_timestamp = time::Instant::now();
+            self.button_press_timestamp = now;
         } else if !self.button_longpress_active
             && button_held
-            && self.button_press_timestamp.elapsed() > time::Duration::from_millis(1000)
+            && now > self.button_press_timestamp + time::Duration::from_millis(1000)
         {
             long_press = true;
             self.button_longpress_active = true;
@@ -558,6 +559,8 @@ impl ControlDriver {
                 + time::Duration::from_millis(duration.as_millis() as u64);
             while self.rtc.time_since_boot() < target {}
         } else {
+            // Turn off logging since log messages can cause hangs
+            // when the serial/JTAG interface is messed up due to sleeps
             self.rtc.sleep_light(&[&timer]);
         }
     }
@@ -609,7 +612,7 @@ fn i2s_tx_buffer() -> &'static mut [u8; I2S_TX_BUFFER_SIZE_BYTES] {
 }
 
 fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHardware) {
-    info!("Power off!");
+    println!("Power off!");
 
     let mut led_driver = led_hardware.build_low_power();
 
@@ -676,7 +679,7 @@ async fn power_on_loop(
     ble_hardware: &mut BleHardware,
 ) {
     control_driver.hold_power_on();
-    info!("Power on!");
+    println!("Power on!");
 
     let mut led_driver = led_hardware.build_high_power();
 
@@ -709,7 +712,7 @@ async fn power_on_loop(
                 if group_state.pattern != pattern_ix && group_state.pattern < PATTERN_COUNT {
                     pattern_ix = group_state.pattern;
                     new_pattern = true;
-                    info!("Sync pattern to {:?}", pattern_ix);
+                    println!("Sync pattern to {:?}", pattern_ix);
                 }
             }
 
@@ -724,11 +727,11 @@ async fn power_on_loop(
                         group_state.update(pattern_ix);
                     }
                     new_pattern = true;
-                    info!("Advance pattern to {:?}", pattern_ix);
+                    println!("Advance pattern to {:?}", pattern_ix);
                 }
                 ButtonEvent::LongPress => {
                     control_driver.release_power();
-                    info!("Power off, goodbye!");
+                    println!("Power off, goodbye!");
                     return; // Power Off
                 }
             }

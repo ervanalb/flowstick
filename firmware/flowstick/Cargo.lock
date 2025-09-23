@@ -810,7 +810,6 @@ dependencies = [
  "esp-radio",
  "esp-radio-preempt-baremetal",
  "heapless",
- "log",
  "png",
  "rs_shake128",
  "trouble-host",

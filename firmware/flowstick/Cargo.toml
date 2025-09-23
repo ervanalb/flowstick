@@ -21,10 +21,9 @@ esp-backtrace = { version = "0.17.0", features = [
 esp-hal = { version = "1.0.0-rc.0", features = [ "unstable" ] }
 esp-hal-embassy = { version = "0.9.0", features = [ "log-04"] }
 esp-alloc = { version = "0.8.0" }
-esp-println = { version = "0.15.0", features = ["log-04"] }
+esp-println = { version = "0.15.0" }
 esp-radio = { version = "0.15.0", features = [ "unstable", "ble" ] }
 esp-radio-preempt-baremetal = { version = "0.0.1", features = ["log-04"] }
-log = "0.4.27"
 trouble-host = { version = "0.2.4", features = ["default-packet-pool-mtu-255", "scan"] }
 heapless = "0.8"
 bincode = { version = "2.0.1", default-features = false, features = [] }
