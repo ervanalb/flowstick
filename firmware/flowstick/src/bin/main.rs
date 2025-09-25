@@ -11,8 +11,8 @@ use embassy_time::{Duration, Timer};
 use esp_alloc as _;
 use esp_backtrace as _;
 use esp_hal::{
-    analog, delay, dma, dma_circular_descriptors, gpio, i2s, peripherals, rtc_cntl, spi, time,
-    timer, usb_serial_jtag::UsbSerialJtag, Blocking,
+    analog, delay, dma, dma_circular_descriptors, gpio, i2s, peripherals, rtc_cntl, spi, system,
+    time, timer, usb_serial_jtag, Blocking, Config,
 };
 use esp_println::println;
 use esp_radio::ble::controller::BleConnector;
@@ -33,6 +33,28 @@ pub const IMAGE_DATA: &[u8] = include_bytes!("../test.data");
 
 const COMPANY_ID: u16 = 0xFFFF;
 const MY_ID: u16 = 0x218C;
+
+const FLOWSTICK_DISABLE_SLEEP: bool = const {
+    match option_env!("FLOWSTICK_DISABLE_SLEEP") {
+        Some(x) => match x.as_bytes() {
+            b"true" | b"1" => true,
+            b"false" | b"0" => false,
+            _ => panic!("FLOWSTICK_DISABLE_SLEEP must be a boolean value"),
+        },
+        None => false,
+    }
+};
+
+const FLOWSTICK_POWER_ON: bool = const {
+    match option_env!("FLOWSTICK_POWER_ON") {
+        Some(x) => match x.as_bytes() {
+            b"true" | b"1" => true,
+            b"false" | b"0" => false,
+            _ => panic!("FLOWSTICK_POWER_ON must be a boolean value"),
+        },
+        None => false,
+    }
+};
 
 #[derive(Clone, Debug)]
 pub struct GroupState {
@@ -200,7 +222,8 @@ impl LedHardware {
             self.i2s.reborrow(),
             i2s::master::Standard::Philips,
             i2s::master::DataFormat::Data8Channel8,
-            time::Rate::from_hz(624999), // 5 MHz bit clock. There is a bug preventing use of
+            time::Rate::from_hz(250000), // 2 MHz bit clock
+            //time::Rate::from_hz(624999), // 5 MHz bit clock. There is a bug preventing use of
             // 625000, but this gives the same clock register values
             self.dma.reborrow(),
         );
@@ -385,15 +408,26 @@ impl<'a> EventHandler for AdvListener<'a> {
 
 fn init() -> (ControlDriver, LedHardware, BleHardware) {
     esp_alloc::heap_allocator!(size: 72 * 1024);
-    let peripherals = esp_hal::init(esp_hal::Config::default());
-    UsbSerialJtag::new(peripherals.USB_DEVICE);
+    let peripherals = esp_hal::init(Config::default());
+    usb_serial_jtag::UsbSerialJtag::new(peripherals.USB_DEVICE);
 
-    let timg0 = timer::timg::TimerGroup::new(peripherals.TIMG0);
-    esp_radio_preempt_baremetal::init(timg0.timer0);
+    let mut rtc = rtc_cntl::Rtc::new(peripherals.LPWR);
+
+    // Watchdog
+    rtc.rwdt.set_timeout(
+        rtc_cntl::RwdtStage::Stage0,
+        time::Duration::from_millis(5_000),
+    );
+    rtc.rwdt.enable();
 
     // Embassy
     let systimer = esp_hal::timer::systimer::SystemTimer::new(peripherals.SYSTIMER);
     esp_hal_embassy::init(systimer.alarm0);
+
+    // Scheduler
+    let timg0 = timer::timg::TimerGroup::new(peripherals.TIMG0);
+    esp_radio_preempt_baremetal::init(timg0.timer0);
+    let radio = esp_radio::init().unwrap();
 
     // Peripherals
     let pwrhld = gpio::Output::new(
@@ -443,10 +477,16 @@ fn init() -> (ControlDriver, LedHardware, BleHardware) {
     let batt_measure = adc_config.enable_pin(peripherals.GPIO9, analog::adc::Attenuation::_11dB);
     let adc = analog::adc::Adc::new(peripherals.ADC1, adc_config);
 
-    let rtc = rtc_cntl::Rtc::new(peripherals.LPWR);
-    let radio = esp_radio::init().unwrap();
-
     let button_press_timestamp = rtc.time_since_boot();
+
+    // Persist longpresses over software resets.
+    // Otherwise, holding the button down while the device is "on"
+    // will cause it to switch off and then switch back on.
+    let button_held_through_sw_reset = match system::reset_reason() {
+        Some(rtc_cntl::SocResetReason::CoreSw) => button.is_high(),
+        _ => false,
+    };
+
     (
         ControlDriver {
             pwrhld,
@@ -458,9 +498,9 @@ fn init() -> (ControlDriver, LedHardware, BleHardware) {
             vref,
             batt_measure,
             rtc,
-            last_button_held: false,
+            last_button_held: button_held_through_sw_reset,
             button_press_timestamp,
-            button_longpress_active: false,
+            button_longpress_active: button_held_through_sw_reset,
         },
         LedHardware {
             dat: peripherals.GPIO21,
@@ -540,29 +580,18 @@ impl ControlDriver {
         0
     }
 
-    pub fn sleep(&mut self, duration: core::time::Duration) {
-        let timer = rtc_cntl::sleep::TimerWakeupSource::new(duration);
+    pub fn sleep(&mut self, duration: time::Duration) {
+        let timer = rtc_cntl::sleep::TimerWakeupSource::new(core::time::Duration::from_millis(
+            duration.as_millis(),
+        ));
+        //let gpio = rtc_cntl::sleep::GpioWakeupSource::new();
 
-        const DISABLE_SLEEP: bool = const {
-            match option_env!("FLOWSTICK_DISABLE_SLEEP") {
-                Some(x) => match x.as_bytes() {
-                    b"true" | b"1" => true,
-                    b"false" | b"0" => false,
-                    _ => panic!("FLOWSTICK_DISABLE_SLEEP must be a boolean value"),
-                },
-                None => false,
-            }
-        };
+        //self.rtc.sleep_light(&[&timer, &gpio]);
+        self.rtc.sleep_deep(&[&timer]);
+    }
 
-        if DISABLE_SLEEP {
-            let target = self.rtc.time_since_boot()
-                + time::Duration::from_millis(duration.as_millis() as u64);
-            while self.rtc.time_since_boot() < target {}
-        } else {
-            // Turn off logging since log messages can cause hangs
-            // when the serial/JTAG interface is messed up due to sleeps
-            self.rtc.sleep_light(&[&timer]);
-        }
+    pub fn feed_wdt(&mut self) {
+        self.rtc.rwdt.feed();
     }
 }
 
@@ -612,15 +641,44 @@ fn i2s_tx_buffer() -> &'static mut [u8; I2S_TX_BUFFER_SIZE_BYTES] {
 }
 
 fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHardware) {
-    println!("Power off!");
-
     let mut led_driver = led_hardware.build_low_power();
 
     let mut led_bytes = [0_u8; FRAME_SIZE_BYTES];
-    populate_frame_buffer(&mut led_bytes, |_| (0x00, 0x00, 0x00));
-    led_driver.write_bytes(&led_bytes); // Turn off LEDs
 
+    let rr: usize = system::reset_reason().unwrap() as usize;
+    populate_frame_buffer(&mut led_bytes, |i| {
+        if i < rr {
+            (0x0F, 0x0F, 0x00)
+        } else {
+            (0x00, 0x00, 0x00)
+        }
+    });
+    led_driver.write_bytes(&led_bytes); // Turn off LEDs // XXX
+    delay::Delay::new().delay(time::Duration::from_millis(50));
+
+    match system::reset_reason() {
+        Some(rtc_cntl::SocResetReason::SysRtcWdt) => {
+            // See if we reset due to WDT expiration. If so, show a red bar to indicate error
+            // and pause for 2 seconds to allow debugger to connect
+
+            populate_frame_buffer(&mut led_bytes, |_| (0xFF, 0x00, 0x00));
+            led_driver.write_bytes(&led_bytes);
+            for _ in 0..20 {
+                delay::Delay::new().delay(time::Duration::from_millis(100));
+                control_driver.feed_wdt();
+            }
+        }
+        _ => {}
+    };
+
+    const FRAME_PERIOD: time::Duration = time::Duration::from_millis(2_000);
     let mut frame = 0;
+    let now = control_driver.rtc.time_since_boot();
+    let mut next_frame_timestamp = now + FRAME_PERIOD;
+
+    // Keep awake for a brief period after charger is plugged in
+    // to allow for debugger to attach
+    let keep_awake_until = now + time::Duration::from_millis(0); // XXX
 
     loop {
         let (button_held, button_event) = control_driver.button_poll();
@@ -646,18 +704,17 @@ fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHard
             if charging {
                 // Red
                 populate_frame_buffer(&mut led_bytes, |i| {
-                    if i == 0 && (frame & (1 << 4)) == 0 {
-                        (0xFF, 0x00, 0x00)
+                    if i == 0 && frame == 0 {
+                        (0x0F, 0x00, 0x00)
                     } else {
                         (0x00, 0x00, 0x00)
                     }
                 });
-                frame = (frame + 1) & ((1 << 5) - 1);
             } else {
                 // Green
                 populate_frame_buffer(&mut led_bytes, |i| {
                     if i == 0 {
-                        (0x00, 0xFF, 0x00)
+                        (0x00, 0x0F, 0x00)
                     } else {
                         (0x00, 0x00, 0x00)
                     }
@@ -669,7 +726,29 @@ fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHard
         }
         led_driver.write_bytes(&led_bytes);
 
-        control_driver.sleep(core::time::Duration::from_millis(80));
+        let now = control_driver.rtc.time_since_boot();
+        if now >= next_frame_timestamp {
+            frame = (frame + 1) % 2;
+            next_frame_timestamp = now + FRAME_PERIOD;
+        }
+
+        if next_frame_timestamp > now {
+            let sleep_duration = next_frame_timestamp - now;
+            if !FLOWSTICK_DISABLE_SLEEP
+                && !button_held
+                && now > keep_awake_until
+                && sleep_duration > time::Duration::from_millis(1)
+            {
+                control_driver.sleep(sleep_duration);
+            } else {
+                // Busy-wait
+                while control_driver.rtc.time_since_boot() < next_frame_timestamp
+                    && !control_driver.button.is_high()
+                {}
+            }
+        }
+
+        control_driver.feed_wdt();
     }
 }
 
@@ -743,6 +822,7 @@ async fn power_on_loop(
 
             // Animation
             led_dma.feed(|buf| pattern.populate_led_frame(&mut pattern_state, buf));
+            control_driver.feed_wdt();
             yield_now().await;
         }
     })
@@ -758,32 +838,27 @@ async fn power_on_loop(
 
 #[esp_hal_embassy::main]
 async fn main(_spawner: embassy_executor::Spawner) -> ! {
-    const FLOWSTICK_POWER_ON: bool = const {
-        match option_env!("FLOWSTICK_POWER_ON") {
-            Some(x) => match x.as_bytes() {
-                b"true" | b"1" => true,
-                b"false" | b"0" => false,
-                _ => panic!("FLOWSTICK_POWER_ON must be a boolean value"),
-            },
-            None => false,
-        }
-    };
-
     let (mut control_driver, mut led_hardware, mut ble_hardware) = init();
 
-    let (button_held, _) = control_driver.button_poll();
-    if !button_held {
-        // Power-on happened due to USB plug in
-        // 2 second period to allow debugger to be attached
-        delay::Delay::new().delay(time::Duration::from_millis(2000));
+    if !FLOWSTICK_POWER_ON {
+        power_off_loop(&mut control_driver, &mut led_hardware);
+    }
 
-        if FLOWSTICK_POWER_ON {
+    power_on_loop(&mut control_driver, &mut led_hardware, &mut ble_hardware).await;
+
+    if !FLOWSTICK_DISABLE_SLEEP {
+        // Normal behavior: turn off all LEDs and perform a system reset
+        let mut led_driver = led_hardware.build_low_power();
+        let mut led_bytes = [0_u8; FRAME_SIZE_BYTES];
+        populate_frame_buffer(&mut led_bytes, |_| (0x00, 0x00, 0x00));
+        led_driver.write_bytes(&led_bytes); // Turn off LEDs
+        system::software_reset();
+    } else {
+        // Debug behavior: don't reset, just loop between power on and power off
+        loop {
+            power_off_loop(&mut control_driver, &mut led_hardware);
             power_on_loop(&mut control_driver, &mut led_hardware, &mut ble_hardware).await;
         }
-    }
-    loop {
-        power_off_loop(&mut control_driver, &mut led_hardware);
-        power_on_loop(&mut control_driver, &mut led_hardware, &mut ble_hardware).await;
     }
 }
 
