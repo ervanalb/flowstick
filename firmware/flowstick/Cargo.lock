@@ -714,7 +714,7 @@ dependencies = [
 [[package]]
 name = "esp32"
 version = "0.38.0"
-source = "git+https://github.com/esp-rs/esp-pacs?rev=c6257509fab5a584a5b6b49855bdde5cd0adee87#c6257509fab5a584a5b6b49855bdde5cd0adee87"
+source = "git+https://github.com/esp-rs/esp-pacs.git?rev=c6257509fab5a584a5b6b49855bdde5cd0adee87#c6257509fab5a584a5b6b49855bdde5cd0adee87"
 dependencies = [
  "critical-section",
  "vcell",
@@ -723,7 +723,7 @@ dependencies = [
 [[package]]
 name = "esp32c2"
 version = "0.27.0"
-source = "git+https://github.com/esp-rs/esp-pacs?rev=c6257509fab5a584a5b6b49855bdde5cd0adee87#c6257509fab5a584a5b6b49855bdde5cd0adee87"
+source = "git+https://github.com/esp-rs/esp-pacs.git?rev=c6257509fab5a584a5b6b49855bdde5cd0adee87#c6257509fab5a584a5b6b49855bdde5cd0adee87"
 dependencies = [
  "critical-section",
  "vcell",
@@ -732,7 +732,7 @@ dependencies = [
 [[package]]
 name = "esp32c3"
 version = "0.30.0"
-source = "git+https://github.com/esp-rs/esp-pacs?rev=c6257509fab5a584a5b6b49855bdde5cd0adee87#c6257509fab5a584a5b6b49855bdde5cd0adee87"
+source = "git+https://github.com/esp-rs/esp-pacs.git?rev=c6257509fab5a584a5b6b49855bdde5cd0adee87#c6257509fab5a584a5b6b49855bdde5cd0adee87"
 dependencies = [
  "critical-section",
  "vcell",
@@ -741,7 +741,7 @@ dependencies = [
 [[package]]
 name = "esp32c6"
 version = "0.21.0"
-source = "git+https://github.com/esp-rs/esp-pacs?rev=c6257509fab5a584a5b6b49855bdde5cd0adee87#c6257509fab5a584a5b6b49855bdde5cd0adee87"
+source = "git+https://github.com/esp-rs/esp-pacs.git?rev=c6257509fab5a584a5b6b49855bdde5cd0adee87#c6257509fab5a584a5b6b49855bdde5cd0adee87"
 dependencies = [
  "critical-section",
  "vcell",
@@ -750,7 +750,7 @@ dependencies = [
 [[package]]
 name = "esp32h2"
 version = "0.17.0"
-source = "git+https://github.com/esp-rs/esp-pacs?rev=c6257509fab5a584a5b6b49855bdde5cd0adee87#c6257509fab5a584a5b6b49855bdde5cd0adee87"
+source = "git+https://github.com/esp-rs/esp-pacs.git?rev=c6257509fab5a584a5b6b49855bdde5cd0adee87#c6257509fab5a584a5b6b49855bdde5cd0adee87"
 dependencies = [
  "critical-section",
  "vcell",
@@ -759,7 +759,7 @@ dependencies = [
 [[package]]
 name = "esp32s2"
 version = "0.29.0"
-source = "git+https://github.com/esp-rs/esp-pacs?rev=c6257509fab5a584a5b6b49855bdde5cd0adee87#c6257509fab5a584a5b6b49855bdde5cd0adee87"
+source = "git+https://github.com/esp-rs/esp-pacs.git?rev=c6257509fab5a584a5b6b49855bdde5cd0adee87#c6257509fab5a584a5b6b49855bdde5cd0adee87"
 dependencies = [
  "critical-section",
  "vcell",
@@ -768,7 +768,7 @@ dependencies = [
 [[package]]
 name = "esp32s3"
 version = "0.33.0"
-source = "git+https://github.com/esp-rs/esp-pacs?rev=c6257509fab5a584a5b6b49855bdde5cd0adee87#c6257509fab5a584a5b6b49855bdde5cd0adee87"
+source = "git+https://github.com/esp-rs/esp-pacs.git?rev=c6257509fab5a584a5b6b49855bdde5cd0adee87#c6257509fab5a584a5b6b49855bdde5cd0adee87"
 dependencies = [
  "critical-section",
  "vcell",
@@ -809,6 +809,7 @@ dependencies = [
  "esp-println",
  "esp-radio",
  "esp-radio-preempt-baremetal",
+ "esp32s3",
  "heapless",
  "png",
  "rs_shake128",

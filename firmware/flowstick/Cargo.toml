@@ -28,6 +28,7 @@ trouble-host = { version = "0.2.4", features = ["default-packet-pool-mtu-255", "
 heapless = "0.8"
 bincode = { version = "2.0.1", default-features = false, features = [] }
 rs_shake128 = { version = "0.1.2" }
+esp32s3 = "0.33.0"
 
 [features]
 default = ["esp32s3"]
@@ -43,6 +44,7 @@ esp-hal-embassy = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd898
 esp-alloc = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
 esp-println = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
 trouble-host = {git = "https://github.com/embassy-rs/trouble.git", rev = "f9ce4724272951c2ebbed81910035996f4365a89"}
+esp32s3 = {git= "https://github.com/esp-rs/esp-pacs.git", rev = "c6257509fab5a584a5b6b49855bdde5cd0adee87"}
 
 [build-dependencies]
 png = "0.18.0"

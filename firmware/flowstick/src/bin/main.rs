@@ -34,28 +34,6 @@ pub const IMAGE_DATA: &[u8] = include_bytes!("../test.data");
 const COMPANY_ID: u16 = 0xFFFF;
 const MY_ID: u16 = 0x218C;
 
-const FLOWSTICK_DISABLE_SLEEP: bool = const {
-    match option_env!("FLOWSTICK_DISABLE_SLEEP") {
-        Some(x) => match x.as_bytes() {
-            b"true" | b"1" => true,
-            b"false" | b"0" => false,
-            _ => panic!("FLOWSTICK_DISABLE_SLEEP must be a boolean value"),
-        },
-        None => false,
-    }
-};
-
-const FLOWSTICK_POWER_ON: bool = const {
-    match option_env!("FLOWSTICK_POWER_ON") {
-        Some(x) => match x.as_bytes() {
-            b"true" | b"1" => true,
-            b"false" | b"0" => false,
-            _ => panic!("FLOWSTICK_POWER_ON must be a boolean value"),
-        },
-        None => false,
-    }
-};
-
 #[derive(Clone, Debug)]
 pub struct GroupState {
     group_id: u16,
@@ -156,15 +134,15 @@ impl GroupState {
 }
 
 struct LedDma<'d> {
-    i2s_transfer: dma::DmaTransferTxCircular<'d, i2s::master::I2sTx<'d, Blocking>>,
+    i2s_transfer: dma::DmaTransferTxCircular<'d, i2s::master::I2sTx<'static, Blocking>>,
 }
 
-struct LedDriverHighPower<'d> {
-    i2s_tx: i2s::master::I2sTx<'d, Blocking>,
+struct LedDriverHighPower {
+    i2s_tx: i2s::master::I2sTx<'static, Blocking>,
 }
 
-impl<'a> LedDriverHighPower<'a> {
-    fn begin_dma(&'a mut self) -> LedDma<'a> {
+impl LedDriverHighPower {
+    fn begin_dma<'a>(&'a mut self) -> LedDma<'a> {
         let buf = i2s_tx_buffer();
         let mut i2s_transfer = self.i2s_tx.write_dma_circular(buf).unwrap();
 
@@ -208,6 +186,36 @@ impl LedDriverLowPower<'_> {
     }
 }
 
+pub struct AdcHardware {
+    adc1: peripherals::ADC1<'static>,
+    vref_gpio: peripherals::GPIO8<'static>,
+    batt_measure_gpio: peripherals::GPIO9<'static>,
+}
+
+impl AdcHardware {
+    fn build_and_read_battery_voltage(self) -> u16 {
+        // ADC for battery
+        let mut adc_config = analog::adc::AdcConfig::new();
+        let mut vref = adc_config
+            .enable_pin_with_cal::<peripherals::GPIO8<'_>, analog::adc::AdcCalBasic<_>>(
+                self.vref_gpio,
+                analog::adc::Attenuation::_11dB,
+            );
+        let mut batt_measure = adc_config
+            .enable_pin_with_cal::<peripherals::GPIO9<'_>, analog::adc::AdcCalBasic<_>>(
+                self.batt_measure_gpio,
+                analog::adc::Attenuation::_11dB,
+            );
+        let mut adc = analog::adc::Adc::new(self.adc1, adc_config);
+
+        let vref = adc.read_blocking(&mut vref);
+        let batt_measure = adc.read_blocking(&mut batt_measure);
+        (3300_u32 * (batt_measure as u32) / (vref as u32))
+            .try_into()
+            .unwrap_or(core::u16::MAX)
+    }
+}
+
 pub struct LedHardware {
     dat: peripherals::GPIO21<'static>,
     clk: peripherals::GPIO37<'static>,
@@ -217,23 +225,23 @@ pub struct LedHardware {
 }
 
 impl LedHardware {
-    fn build_high_power(&mut self) -> LedDriverHighPower {
+    fn build_high_power(self) -> LedDriverHighPower {
         let i2s = i2s::master::I2s::new(
-            self.i2s.reborrow(),
+            self.i2s,
             i2s::master::Standard::Philips,
             i2s::master::DataFormat::Data8Channel8,
             time::Rate::from_hz(250000), // 2 MHz bit clock
             //time::Rate::from_hz(624999), // 5 MHz bit clock. There is a bug preventing use of
             // 625000, but this gives the same clock register values
-            self.dma.reborrow(),
+            self.dma,
         );
 
         let (_, i2s_tx_descriptors) =
             dma_circular_descriptors!(FRAME_SIZE_BYTES * DMA_BUFFER_SIZE_FRAMES);
         let i2s_tx = i2s
             .i2s_tx
-            .with_bclk(self.clk.reborrow())
-            .with_dout(self.dat.reborrow())
+            .with_bclk(self.clk)
+            .with_dout(self.dat)
             .build(i2s_tx_descriptors); // There is currently no way to build a descriptor chain with chunk
                                         // size other than dma::CHUNK_SIZE
 
@@ -261,9 +269,17 @@ struct ControlDriver {
     vbus_sense: gpio::Input<'static>,
     chg_sense: gpio::Input<'static>,
     imu_spi: spi::master::Spi<'static, Blocking>,
-    adc: analog::adc::Adc<'static, peripherals::ADC1<'static>, Blocking>,
-    vref: analog::adc::AdcPin<peripherals::GPIO8<'static>, peripherals::ADC1<'static>>,
-    batt_measure: analog::adc::AdcPin<peripherals::GPIO9<'static>, peripherals::ADC1<'static>>,
+    //adc: analog::adc::Adc<'static, peripherals::ADC1<'static>, Blocking>,
+    //vref: analog::adc::AdcPin<
+    //    peripherals::GPIO8<'static>,
+    //    peripherals::ADC1<'static>,
+    //    analog::adc::AdcCalBasic<peripherals::ADC1<'static>>,
+    //>,
+    //batt_measure: analog::adc::AdcPin<
+    //    peripherals::GPIO9<'static>,
+    //    peripherals::ADC1<'static>,
+    //    analog::adc::AdcCalBasic<peripherals::ADC1<'static>>,
+    //>,
     rtc: rtc_cntl::Rtc<'static>,
     last_button_held: bool,
     button_press_timestamp: time::Duration,
@@ -272,12 +288,17 @@ struct ControlDriver {
 
 struct BleHardware {
     bt: peripherals::BT<'static>,
-    radio: esp_radio::Controller<'static>,
+    timg0: peripherals::TIMG0<'static>,
 }
 
 impl BleHardware {
-    async fn run(&mut self, group_state: &RefCell<GroupState>) {
-        let connector = BleConnector::new(&self.radio, self.bt.reborrow());
+    async fn run(self, group_state: &RefCell<GroupState>) {
+        // Scheduler
+        let timg0 = timer::timg::TimerGroup::new(self.timg0);
+        esp_radio_preempt_baremetal::init(timg0.timer0);
+
+        let radio = esp_radio::init().unwrap();
+        let connector = BleConnector::new(&radio, self.bt);
         let controller: ExternalController<_, 20> = ExternalController::new(connector);
 
         // XXX Temporary: fixed random MAC address
@@ -406,9 +427,10 @@ impl<'a> EventHandler for AdvListener<'a> {
     }
 }
 
-fn init() -> (ControlDriver, LedHardware, BleHardware) {
+fn init() -> (ControlDriver, LedHardware, BleHardware, AdcHardware) {
     esp_alloc::heap_allocator!(size: 72 * 1024);
     let peripherals = esp_hal::init(Config::default());
+
     usb_serial_jtag::UsbSerialJtag::new(peripherals.USB_DEVICE);
 
     let mut rtc = rtc_cntl::Rtc::new(peripherals.LPWR);
@@ -424,11 +446,6 @@ fn init() -> (ControlDriver, LedHardware, BleHardware) {
     let systimer = esp_hal::timer::systimer::SystemTimer::new(peripherals.SYSTIMER);
     esp_hal_embassy::init(systimer.alarm0);
 
-    // Scheduler
-    let timg0 = timer::timg::TimerGroup::new(peripherals.TIMG0);
-    esp_radio_preempt_baremetal::init(timg0.timer0);
-    let radio = esp_radio::init().unwrap();
-
     // Peripherals
     let pwrhld = gpio::Output::new(
         peripherals.GPIO11,
@@ -443,6 +460,21 @@ fn init() -> (ControlDriver, LedHardware, BleHardware) {
         gpio::Level::Low,
         gpio::OutputConfig::default(),
     );
+    /*
+    unsafe {
+        // Hold GPIOs during reset
+        let rtc_cntl = esp32s3::RTC_CNTL::steal();
+        rtc_cntl.dig_iso().modify(|_, w| {
+            w.dg_pad_force_unhold()
+                .bit(false)
+                .dg_pad_autohold_en()
+                .bit(true)
+        });
+        rtc_cntl
+            .dig_pad_hold()
+            .write(|w| w.dig_pad_hold().bits(1 << 18));
+    }
+    */
 
     let mut button = gpio::Input::new(
         peripherals.GPIO10,
@@ -471,12 +503,6 @@ fn init() -> (ControlDriver, LedHardware, BleHardware) {
     .with_sck(peripherals.GPIO35)
     .with_cs(peripherals.GPIO36);
 
-    // ADC for battery
-    let mut adc_config = analog::adc::AdcConfig::new();
-    let vref = adc_config.enable_pin(peripherals.GPIO8, analog::adc::Attenuation::_11dB);
-    let batt_measure = adc_config.enable_pin(peripherals.GPIO9, analog::adc::Attenuation::_11dB);
-    let adc = analog::adc::Adc::new(peripherals.ADC1, adc_config);
-
     let button_press_timestamp = rtc.time_since_boot();
 
     // Persist longpresses over software resets.
@@ -494,9 +520,9 @@ fn init() -> (ControlDriver, LedHardware, BleHardware) {
             vbus_sense,
             chg_sense,
             imu_spi,
-            adc,
-            vref,
-            batt_measure,
+            //adc,
+            //vref,
+            //batt_measure,
             rtc,
             last_button_held: button_held_through_sw_reset,
             button_press_timestamp,
@@ -511,7 +537,12 @@ fn init() -> (ControlDriver, LedHardware, BleHardware) {
         },
         BleHardware {
             bt: peripherals.BT,
-            radio,
+            timg0: peripherals.TIMG0,
+        },
+        AdcHardware {
+            adc1: peripherals.ADC1,
+            vref_gpio: peripherals.GPIO8,
+            batt_measure_gpio: peripherals.GPIO9,
         },
     )
 }
@@ -573,12 +604,13 @@ impl ControlDriver {
         self.chg_sense.is_low()
     }
 
-    pub fn read_batt_voltage(&mut self) -> u16 {
-        let vref = self.adc.read_blocking(&mut self.vref);
-        let batt_measure = self.adc.read_blocking(&mut self.batt_measure);
-        println!("vref={:?}, batt_measure={:?}", vref, batt_measure);
-        0
-    }
+    //pub fn read_batt_voltage(&mut self) -> u16 {
+    //    let vref = self.adc.read_blocking(&mut self.vref);
+    //    let batt_measure = self.adc.read_blocking(&mut self.batt_measure);
+    //    (3300_u32 * (batt_measure as u32) / (vref as u32))
+    //        .try_into()
+    //        .unwrap_or(core::u16::MAX)
+    //}
 
     pub fn sleep(&mut self, duration: time::Duration) {
         let timer = rtc_cntl::sleep::TimerWakeupSource::new(core::time::Duration::from_millis(
@@ -586,8 +618,9 @@ impl ControlDriver {
         ));
         //let gpio = rtc_cntl::sleep::GpioWakeupSource::new();
 
-        //self.rtc.sleep_light(&[&timer, &gpio]);
-        self.rtc.sleep_deep(&[&timer]);
+        let cfg = rtc_cntl::sleep::RtcSleepConfig::deep();
+        //cfg.set_rtc_fastmem_pd_en(false);
+        self.rtc.sleep(&cfg, &[&timer]);
     }
 
     pub fn feed_wdt(&mut self) {
@@ -645,16 +678,16 @@ fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHard
 
     let mut led_bytes = [0_u8; FRAME_SIZE_BYTES];
 
-    let rr: usize = system::reset_reason().unwrap() as usize;
-    populate_frame_buffer(&mut led_bytes, |i| {
-        if i < rr {
-            (0x0F, 0x0F, 0x00)
-        } else {
-            (0x00, 0x00, 0x00)
-        }
-    });
-    led_driver.write_bytes(&led_bytes); // Turn off LEDs // XXX
-    delay::Delay::new().delay(time::Duration::from_millis(50));
+    //let rr: usize = system::reset_reason().unwrap() as usize;
+    //populate_frame_buffer(&mut led_bytes, |i| {
+    //    if i < rr {
+    //        (0x0F, 0x0F, 0x00)
+    //    } else {
+    //        (0x00, 0x00, 0x00)
+    //    }
+    //});
+    //led_driver.write_bytes(&led_bytes); // Turn off LEDs // XXX
+    //delay::Delay::new().delay(time::Duration::from_millis(50));
 
     match system::reset_reason() {
         Some(rtc_cntl::SocResetReason::SysRtcWdt) => {
@@ -671,14 +704,23 @@ fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHard
         _ => {}
     };
 
+    /*
+    let batt_voltage = control_driver.read_batt_voltage();
+    const BATT_BARS: u16 = 5;
+    const BATT_MIN_V: u16 = 2500;
+    const BATT_MAX_V: u16 = 4200;
+    let full_bars: u16 = if batt_voltage <= BATT_MIN_V {
+        0
+    } else if batt_voltage >= BATT_MAX_V {
+        BATT_BARS
+    } else {
+        BATT_BARS * (batt_voltage - BATT_MIN_V) / (BATT_MAX_V - BATT_MIN_V)
+    };
+    */
+
     const FRAME_PERIOD: time::Duration = time::Duration::from_millis(2_000);
-    let mut frame = 0;
     let now = control_driver.rtc.time_since_boot();
     let mut next_frame_timestamp = now + FRAME_PERIOD;
-
-    // Keep awake for a brief period after charger is plugged in
-    // to allow for debugger to attach
-    let keep_awake_until = now + time::Duration::from_millis(0); // XXX
 
     loop {
         let (button_held, button_event) = control_driver.button_poll();
@@ -698,6 +740,10 @@ fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHard
 
         let usb_power = control_driver.usb_power();
         let charging = control_driver.charging();
+
+        let now = control_driver.rtc.time_since_boot();
+
+        let frame = (now.as_millis() % 2000) / 1000;
 
         // Charging animation
         if usb_power {
@@ -726,19 +772,16 @@ fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHard
         }
         led_driver.write_bytes(&led_bytes);
 
-        let now = control_driver.rtc.time_since_boot();
-        if now >= next_frame_timestamp {
-            frame = (frame + 1) % 2;
-            next_frame_timestamp = now + FRAME_PERIOD;
-        }
+        //if now >= next_frame_timestamp {
+        //    unsafe {
+        //        FRAME = (FRAME + 1) % 2;
+        //    }
+        //    next_frame_timestamp = now + FRAME_PERIOD;
+        //}
 
         if next_frame_timestamp > now {
             let sleep_duration = next_frame_timestamp - now;
-            if !FLOWSTICK_DISABLE_SLEEP
-                && !button_held
-                && now > keep_awake_until
-                && sleep_duration > time::Duration::from_millis(1)
-            {
+            if !button_held && sleep_duration > time::Duration::from_millis(1) {
                 control_driver.sleep(sleep_duration);
             } else {
                 // Busy-wait
@@ -754,11 +797,50 @@ fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHard
 
 async fn power_on_loop(
     control_driver: &mut ControlDriver,
-    led_hardware: &mut LedHardware,
-    ble_hardware: &mut BleHardware,
+    mut led_hardware: LedHardware,
+    ble_hardware: BleHardware,
+    adc_hardware: AdcHardware,
 ) {
     control_driver.hold_power_on();
     println!("Power on!");
+
+    // Temporary battery voltage indicator
+    {
+        //let mut led_driver = led_hardware.build_low_power();
+        //let mut led_bytes = [0_u8; FRAME_SIZE_BYTES];
+
+        delay::Delay::new().delay(time::Duration::from_millis(100));
+        let batt_voltage = adc_hardware.build_and_read_battery_voltage();
+        println!("Battery voltage = {:?} mV", batt_voltage);
+
+        /*
+        const BATT_BARS: u16 = 40;
+        const BATT_MIN_V: u16 = 2900;
+        const BATT_MAX_V: u16 = 4200;
+        let full_bars: u16 = if batt_voltage <= BATT_MIN_V {
+            0
+        } else if batt_voltage >= BATT_MAX_V {
+            BATT_BARS
+        } else {
+            BATT_BARS * (batt_voltage - BATT_MIN_V) / (BATT_MAX_V - BATT_MIN_V)
+        };
+
+        populate_frame_buffer(&mut led_bytes, |i| {
+            if i < BATT_BARS as usize {
+                if i <= full_bars as usize {
+                    (0x00, 0x0F, 0x00)
+                } else {
+                    (0x0F, 0x00, 0x00)
+                }
+            } else {
+                (0x00, 0x00, 0x00)
+            }
+        });
+        led_driver.write_bytes(&led_bytes);
+
+        delay::Delay::new().delay(time::Duration::from_millis(1000));
+        */
+    }
 
     let mut led_driver = led_hardware.build_high_power();
 
@@ -838,28 +920,31 @@ async fn power_on_loop(
 
 #[esp_hal_embassy::main]
 async fn main(_spawner: embassy_executor::Spawner) -> ! {
-    let (mut control_driver, mut led_hardware, mut ble_hardware) = init();
+    let (mut control_driver, mut led_hardware, ble_hardware, adc_hardware) = init();
 
-    if !FLOWSTICK_POWER_ON {
+    let reset_reason = system::reset_reason();
+
+    // Power on immediately if Uart or Jtag reset (debugging)
+    let skip_power_off = match reset_reason {
+        Some(rtc_cntl::SocResetReason::CoreUsbUart)
+        | Some(rtc_cntl::SocResetReason::CoreUsbJtag) => true,
+        _ => false,
+    };
+
+    if !skip_power_off {
         power_off_loop(&mut control_driver, &mut led_hardware);
     }
 
-    power_on_loop(&mut control_driver, &mut led_hardware, &mut ble_hardware).await;
+    power_on_loop(
+        &mut control_driver,
+        led_hardware,
+        ble_hardware,
+        adc_hardware,
+    )
+    .await;
 
-    if !FLOWSTICK_DISABLE_SLEEP {
-        // Normal behavior: turn off all LEDs and perform a system reset
-        let mut led_driver = led_hardware.build_low_power();
-        let mut led_bytes = [0_u8; FRAME_SIZE_BYTES];
-        populate_frame_buffer(&mut led_bytes, |_| (0x00, 0x00, 0x00));
-        led_driver.write_bytes(&led_bytes); // Turn off LEDs
-        system::software_reset();
-    } else {
-        // Debug behavior: don't reset, just loop between power on and power off
-        loop {
-            power_off_loop(&mut control_driver, &mut led_hardware);
-            power_on_loop(&mut control_driver, &mut led_hardware, &mut ble_hardware).await;
-        }
-    }
+    // Perform a system reset
+    system::software_reset();
 }
 
 pub fn hsv2rgb(hsv: [u8; 3]) -> [u8; 3] {
