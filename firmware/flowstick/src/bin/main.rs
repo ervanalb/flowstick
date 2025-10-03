@@ -192,27 +192,52 @@ pub struct AdcHardware {
     batt_measure_gpio: peripherals::GPIO9<'static>,
 }
 
+pub struct AdcDriver {
+    vref: analog::adc::AdcPin<
+        peripherals::GPIO8<'static>,
+        peripherals::ADC1<'static>,
+        analog::adc::AdcCalBasic<peripherals::ADC1<'static>>,
+    >,
+    batt_measure: analog::adc::AdcPin<
+        peripherals::GPIO9<'static>,
+        peripherals::ADC1<'static>,
+        analog::adc::AdcCalBasic<peripherals::ADC1<'static>>,
+    >,
+    adc: analog::adc::Adc<'static, peripherals::ADC1<'static>, Blocking>,
+}
+
 impl AdcHardware {
-    fn build_and_read_battery_voltage(self) -> u16 {
+    fn build(self) -> AdcDriver {
         // ADC for battery
         let mut adc_config = analog::adc::AdcConfig::new();
-        let mut vref = adc_config
+        let vref = adc_config
             .enable_pin_with_cal::<peripherals::GPIO8<'_>, analog::adc::AdcCalBasic<_>>(
                 self.vref_gpio,
                 analog::adc::Attenuation::_11dB,
             );
-        let mut batt_measure = adc_config
+        let batt_measure = adc_config
             .enable_pin_with_cal::<peripherals::GPIO9<'_>, analog::adc::AdcCalBasic<_>>(
                 self.batt_measure_gpio,
                 analog::adc::Attenuation::_11dB,
             );
-        let mut adc = analog::adc::Adc::new(self.adc1, adc_config);
+        let adc = analog::adc::Adc::new(self.adc1, adc_config);
 
-        let vref = adc.read_blocking(&mut vref);
-        let batt_measure = adc.read_blocking(&mut batt_measure);
-        (3300_u32 * (batt_measure as u32) / (vref as u32))
-            .try_into()
-            .unwrap_or(core::u16::MAX)
+        AdcDriver {
+            vref,
+            batt_measure,
+            adc,
+        }
+    }
+}
+
+impl AdcDriver {
+    fn read_battery_voltage(&mut self) -> Option<u16> {
+        let vref = self.adc.read_blocking(&mut self.vref);
+        let batt_measure = self.adc.read_blocking(&mut self.batt_measure);
+        if vref < 400 || vref > 3700 || batt_measure < 400 || batt_measure > 3700 {
+            return None;
+        }
+        Some(((3300_u32 * (batt_measure as u32)) / (vref as u32)) as u16)
     }
 }
 
@@ -460,10 +485,11 @@ fn init() -> (ControlDriver, LedHardware, BleHardware, AdcHardware) {
         gpio::Level::Low,
         gpio::OutputConfig::default(),
     );
-    /*
+
     unsafe {
         // Hold GPIOs during reset
         let rtc_cntl = esp32s3::RTC_CNTL::steal();
+
         rtc_cntl.dig_iso().modify(|_, w| {
             w.dg_pad_force_unhold()
                 .bit(false)
@@ -474,7 +500,6 @@ fn init() -> (ControlDriver, LedHardware, BleHardware, AdcHardware) {
             .dig_pad_hold()
             .write(|w| w.dig_pad_hold().bits(1 << 18));
     }
-    */
 
     let mut button = gpio::Input::new(
         peripherals.GPIO10,
@@ -616,11 +641,13 @@ impl ControlDriver {
         let timer = rtc_cntl::sleep::TimerWakeupSource::new(core::time::Duration::from_millis(
             duration.as_millis(),
         ));
-        //let gpio = rtc_cntl::sleep::GpioWakeupSource::new();
+        let gpio = rtc_cntl::sleep::GpioWakeupSource::new();
 
-        let cfg = rtc_cntl::sleep::RtcSleepConfig::deep();
-        //cfg.set_rtc_fastmem_pd_en(false);
-        self.rtc.sleep(&cfg, &[&timer]);
+        let mut cfg = rtc_cntl::sleep::RtcSleepConfig::default();
+        //cfg.set_lslp_mem_inf_fpu(true);
+        //cfg.set_xtal_fpu(true);
+        //cfg.set_rtc_regulator_fpu(true);
+        self.rtc.sleep(&cfg, &[&timer, &gpio]);
     }
 
     pub fn feed_wdt(&mut self) {
@@ -673,11 +700,20 @@ fn i2s_tx_buffer() -> &'static mut [u8; I2S_TX_BUFFER_SIZE_BYTES] {
     }
 }
 
-fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHardware) {
+fn power_off_loop(
+    control_driver: &mut ControlDriver,
+    led_hardware: &mut LedHardware,
+    adc_driver: &mut AdcDriver,
+) {
     let mut led_driver = led_hardware.build_low_power();
 
     let mut led_bytes = [0_u8; FRAME_SIZE_BYTES];
 
+    // Turn LEDs off
+    populate_frame_buffer(&mut led_bytes, |_| (0x00, 0x00, 0x00));
+    led_driver.write_bytes(&led_bytes);
+
+    // RESET REASON FLASH
     //let rr: usize = system::reset_reason().unwrap() as usize;
     //populate_frame_buffer(&mut led_bytes, |i| {
     //    if i < rr {
@@ -686,8 +722,9 @@ fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHard
     //        (0x00, 0x00, 0x00)
     //    }
     //});
-    //led_driver.write_bytes(&led_bytes); // Turn off LEDs // XXX
+    //led_driver.write_bytes(&led_bytes);
     //delay::Delay::new().delay(time::Duration::from_millis(50));
+    // END RESET REASON FLASH
 
     match system::reset_reason() {
         Some(rtc_cntl::SocResetReason::SysRtcWdt) => {
@@ -704,23 +741,18 @@ fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHard
         _ => {}
     };
 
-    /*
-    let batt_voltage = control_driver.read_batt_voltage();
-    const BATT_BARS: u16 = 5;
-    const BATT_MIN_V: u16 = 2500;
-    const BATT_MAX_V: u16 = 4200;
-    let full_bars: u16 = if batt_voltage <= BATT_MIN_V {
-        0
-    } else if batt_voltage >= BATT_MAX_V {
-        BATT_BARS
-    } else {
-        BATT_BARS * (batt_voltage - BATT_MIN_V) / (BATT_MAX_V - BATT_MIN_V)
-    };
-    */
+    const FRAME_PERIOD: time::Duration = time::Duration::from_millis(1000);
 
-    const FRAME_PERIOD: time::Duration = time::Duration::from_millis(2_000);
-    let now = control_driver.rtc.time_since_boot();
-    let mut next_frame_timestamp = now + FRAME_PERIOD;
+    // Charging animation
+    const BATT_BARS: u16 = 5;
+    let mut full_bars = 0;
+
+    // Going into light sleep too soon after power on seems to cause a reset
+    let keep_awake_until = control_driver.rtc.time_since_boot() + time::Duration::from_millis(300);
+
+    let mut last_frame = 0;
+
+    let mut charging = true;
 
     loop {
         let (button_held, button_event) = control_driver.button_poll();
@@ -739,56 +771,82 @@ fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHard
         }
 
         let usb_power = control_driver.usb_power();
-        let charging = control_driver.charging();
 
         let now = control_driver.rtc.time_since_boot();
 
-        let frame = (now.as_millis() % 2000) / 1000;
+        let frame = now.as_millis() / FRAME_PERIOD.as_millis();
+        let next_frame_timestamp =
+            time::Duration::from_millis((frame + 1) * FRAME_PERIOD.as_millis());
+        let frame = frame % 2;
 
-        // Charging animation
-        if usb_power {
-            if charging {
-                // Red
-                populate_frame_buffer(&mut led_bytes, |i| {
-                    if i == 0 && frame == 0 {
-                        (0x0F, 0x00, 0x00)
-                    } else {
-                        (0x00, 0x00, 0x00)
-                    }
-                });
-            } else {
-                // Green
-                populate_frame_buffer(&mut led_bytes, |i| {
-                    if i == 0 {
-                        (0x00, 0x0F, 0x00)
-                    } else {
-                        (0x00, 0x00, 0x00)
-                    }
-                });
+        if frame != last_frame {
+            if let Some(batt_voltage) = adc_driver.read_battery_voltage() {
+                const BATT_MIN_V: u16 = 2500;
+                const BATT_MAX_V: u16 = 4200;
+                full_bars = if batt_voltage <= BATT_MIN_V {
+                    0
+                } else if batt_voltage >= BATT_MAX_V {
+                    BATT_BARS
+                } else {
+                    BATT_BARS * (batt_voltage - BATT_MIN_V) / (BATT_MAX_V - BATT_MIN_V)
+                };
             }
-        } else {
-            // Off
-            populate_frame_buffer(&mut led_bytes, |_| (0x00, 0x00, 0x00));
+
+            // Charging animation
+            if usb_power {
+                if charging {
+                    // Red
+                    populate_frame_buffer(&mut led_bytes, |i| {
+                        let i = i as u16;
+                        if i < BATT_BARS {
+                            if i <= full_bars && frame == 0 {
+                                (0x03, 0x00, 0x00)
+                            } else {
+                                (0x01, 0x00, 0x00)
+                            }
+                        } else {
+                            (0x00, 0x00, 0x00)
+                        }
+                    });
+                } else {
+                    // Green
+                    populate_frame_buffer(&mut led_bytes, |i| {
+                        if i == 0 {
+                            (0x00, 0x03, 0x00)
+                        } else {
+                            (0x00, 0x00, 0x00)
+                        }
+                    });
+                }
+            } else {
+                // Off
+                populate_frame_buffer(&mut led_bytes, |_| (0x00, 0x00, 0x00));
+            }
+
+            /*
+            populate_frame_buffer(&mut led_bytes, |i| {
+                if i < frame as usize {
+                    (0x00, 0x00, 0x03)
+                } else {
+                    (0x00, 0x00, 0x00)
+                }
+            });
+            */
+
+            led_driver.write_bytes(&led_bytes);
+            last_frame = frame;
         }
-        led_driver.write_bytes(&led_bytes);
 
-        //if now >= next_frame_timestamp {
-        //    unsafe {
-        //        FRAME = (FRAME + 1) % 2;
-        //    }
-        //    next_frame_timestamp = now + FRAME_PERIOD;
-        //}
-
-        if next_frame_timestamp > now {
-            let sleep_duration = next_frame_timestamp - now;
-            if !button_held && sleep_duration > time::Duration::from_millis(1) {
-                control_driver.sleep(sleep_duration);
-            } else {
-                // Busy-wait
-                while control_driver.rtc.time_since_boot() < next_frame_timestamp
-                    && !control_driver.button.is_high()
-                {}
-            }
+        // Sleep until next frame
+        let sleep_duration = next_frame_timestamp - now;
+        if !control_driver.button.is_high()
+            && sleep_duration > time::Duration::from_millis(1)
+            && now > keep_awake_until
+        {
+            control_driver.sleep(sleep_duration);
+            charging = control_driver.charging(); // Read pin right after wake-up from sleep
+                                                  // time_since_boot() readings seem to be invalid without a short delay after wakeup
+            delay::Delay::new().delay(time::Duration::from_micros(1));
         }
 
         control_driver.feed_wdt();
@@ -797,9 +855,9 @@ fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHard
 
 async fn power_on_loop(
     control_driver: &mut ControlDriver,
-    mut led_hardware: LedHardware,
+    led_hardware: LedHardware,
     ble_hardware: BleHardware,
-    adc_hardware: AdcHardware,
+    adc_driver: &mut AdcDriver,
 ) {
     control_driver.hold_power_on();
     println!("Power on!");
@@ -808,10 +866,6 @@ async fn power_on_loop(
     {
         //let mut led_driver = led_hardware.build_low_power();
         //let mut led_bytes = [0_u8; FRAME_SIZE_BYTES];
-
-        delay::Delay::new().delay(time::Duration::from_millis(100));
-        let batt_voltage = adc_hardware.build_and_read_battery_voltage();
-        println!("Battery voltage = {:?} mV", batt_voltage);
 
         /*
         const BATT_BARS: u16 = 40;
@@ -925,21 +979,49 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
     let reset_reason = system::reset_reason();
 
     // Power on immediately if Uart or Jtag reset (debugging)
-    let skip_power_off = match reset_reason {
+    let mut skip_power_off = false;
+    match reset_reason {
         Some(rtc_cntl::SocResetReason::CoreUsbUart)
-        | Some(rtc_cntl::SocResetReason::CoreUsbJtag) => true,
-        _ => false,
+        | Some(rtc_cntl::SocResetReason::CoreUsbJtag) => {
+            // Debugging reset: don't deep sleep, and immediately power on
+            skip_power_off = true;
+        }
+        Some(rtc_cntl::SocResetReason::CoreDeepSleep) | Some(rtc_cntl::SocResetReason::CoreSw) => {
+            // Wakeup from deep sleep, or SW reset: don't deep sleep
+        }
+        _ => {
+            // Any other reset reason: deep sleep for 3 seconds to allow battery charger
+            // to put some juice in the battery before we start up
+            // (unless button is held!)
+            // This is necessary since we can't light sleep immediately upon boot (for some reason)
+            // so we need to bank enough power that we can stay awake for ~300 ms
+            // before entering a reduced-power light sleep cycle.
+            if !control_driver.button.is_high() {
+                let mut led_driver = led_hardware.build_low_power();
+                // Turn LEDs off
+                let mut led_bytes = [0_u8; FRAME_SIZE_BYTES];
+                populate_frame_buffer(&mut led_bytes, |_| (0x00, 0x00, 0x00));
+                led_driver.write_bytes(&led_bytes);
+
+                let timer = rtc_cntl::sleep::TimerWakeupSource::new(
+                    core::time::Duration::from_millis(3_000),
+                );
+                control_driver.rtc.sleep_deep(&[&timer]);
+            }
+        }
     };
 
+    let mut adc_driver = adc_hardware.build();
+
     if !skip_power_off {
-        power_off_loop(&mut control_driver, &mut led_hardware);
+        power_off_loop(&mut control_driver, &mut led_hardware, &mut adc_driver);
     }
 
     power_on_loop(
         &mut control_driver,
         led_hardware,
         ble_hardware,
-        adc_hardware,
+        &mut adc_driver,
     )
     .await;
 
