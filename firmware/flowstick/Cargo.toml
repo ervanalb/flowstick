@@ -9,9 +9,9 @@ name = "flowstick"
 path = "./src/bin/main.rs"
 
 [dependencies]
-embassy-executor = { version = "0.7.0", features = ["task-arena-size-32768"] }
+embassy-executor = { version = "0.9.0" }
 embassy-futures = "0.1.1"
-embassy-time = "0.4"
+embassy-time = "0.5.0"
 esp-bootloader-esp-idf = "0.2.0"
 esp-backtrace = { version = "0.17.0", features = [
     "panic-handler",
@@ -19,32 +19,30 @@ esp-backtrace = { version = "0.17.0", features = [
     "semihosting"
 ] }
 esp-hal = { version = "1.0.0-rc.0", features = [ "unstable" ] }
-esp-hal-embassy = { version = "0.9.0", features = [ "log-04"] }
+esp-rtos = { version = "0.0.1", features = [ "esp-radio", "embassy", "log-04"] }
 esp-alloc = { version = "0.8.0" }
 esp-println = { version = "0.15.0" }
 esp-radio = { version = "0.15.0", features = [ "unstable", "ble" ] }
-esp-radio-preempt-baremetal = { version = "0.0.1", features = ["log-04"] }
-trouble-host = { version = "0.2.4", features = ["default-packet-pool-mtu-255", "scan"] }
-heapless = "0.8"
+trouble-host = { version = "0.4.0", features = ["default-packet-pool-mtu-255", "scan"] }
+heapless = "0.9.1"
 bincode = { version = "2.0.1", default-features = false, features = [] }
 rs_shake128 = { version = "0.1.2" }
 esp32s3 = "0.33.0"
 
 [features]
 default = ["esp32s3"]
-esp32s3 = ["esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-hal-embassy/esp32s3", "esp-println/esp32s3", "esp-radio-preempt-baremetal/esp32s3", "esp-radio/esp32s3", "esp-bootloader-esp-idf/esp32s3"]
+esp32s3 = ["esp-hal/esp32s3", "esp-backtrace/esp32s3", "esp-rtos/esp32s3", "esp-println/esp32s3", "esp-radio/esp32s3", "esp-bootloader-esp-idf/esp32s3"]
 
 [patch.crates-io]
-esp-radio = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
-esp-radio-preempt-baremetal = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
-esp-backtrace = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
-esp-hal = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
-esp-bootloader-esp-idf = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
-esp-hal-embassy = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
-esp-alloc = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
-esp-println = {git = "https://github.com/esp-rs/esp-hal.git", rev = "a7bd8980ea2aff28d20bc501e86886dc917c9e28"}
+esp-radio = {git = "https://github.com/esp-rs/esp-hal.git", rev = "7cd7186e6d752ce481b2ddb2e3cc4a5ba05ba2d4"}
+esp-rtos = {git = "https://github.com/esp-rs/esp-hal.git", rev = "7cd7186e6d752ce481b2ddb2e3cc4a5ba05ba2d4"}
+esp-backtrace = {git = "https://github.com/esp-rs/esp-hal.git", rev = "7cd7186e6d752ce481b2ddb2e3cc4a5ba05ba2d4"}
+esp-hal = {git = "https://github.com/esp-rs/esp-hal.git", rev = "7cd7186e6d752ce481b2ddb2e3cc4a5ba05ba2d4"}
+esp-bootloader-esp-idf = {git = "https://github.com/esp-rs/esp-hal.git", rev = "7cd7186e6d752ce481b2ddb2e3cc4a5ba05ba2d4"}
+esp-alloc = {git = "https://github.com/esp-rs/esp-hal.git", rev = "7cd7186e6d752ce481b2ddb2e3cc4a5ba05ba2d4"}
+esp-println = {git = "https://github.com/esp-rs/esp-hal.git", rev = "7cd7186e6d752ce481b2ddb2e3cc4a5ba05ba2d4"}
+
 trouble-host = {git = "https://github.com/embassy-rs/trouble.git", rev = "f9ce4724272951c2ebbed81910035996f4365a89"}
-esp32s3 = {git= "https://github.com/esp-rs/esp-pacs.git", rev = "c6257509fab5a584a5b6b49855bdde5cd0adee87"}
 
 [build-dependencies]
 png = "0.18.0"
