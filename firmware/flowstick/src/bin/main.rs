@@ -11,8 +11,8 @@ use embassy_time::{Duration, Timer};
 use esp_alloc as _;
 use esp_backtrace as _;
 use esp_hal::{
-    analog, delay, dma, dma_circular_descriptors, efuse, gpio, i2s, peripherals, rtc_cntl, spi,
-    system, time, timer, usb_serial_jtag, Blocking, Config,
+    analog, delay, dma, dma_circular_descriptors, gpio, i2s, peripherals, rtc_cntl, spi, system,
+    time, timer, usb_serial_jtag, Blocking, Config,
 };
 use esp_println::println;
 use esp_radio::ble::controller::BleConnector;
@@ -232,11 +232,16 @@ impl AdcHardware {
 
 impl AdcDriver {
     fn read_battery_voltage(&mut self) -> Option<u16> {
-        let batt_measure = self.adc.read_blocking(&mut self.batt_measure);
-        if batt_measure < 400 || batt_measure > 3700 {
-            return None;
+        const ADC_SAMPLES: u32 = 32;
+        let mut batt_measure: u32 = 0;
+        for _ in 0..ADC_SAMPLES {
+            let reading = self.adc.read_blocking(&mut self.batt_measure);
+            if reading < 400 || reading > 3700 {
+                return None;
+            }
+            batt_measure += reading as u32;
         }
-        Some(batt_measure * 2) // Voltage divider divides in half
+        Some((batt_measure * 2 / ADC_SAMPLES) as u16) // Voltage divider divides in half
     }
 }
 
@@ -706,22 +711,11 @@ fn power_off_loop(
 
     let mut led_bytes = [0_u8; FRAME_SIZE_BYTES];
 
+    let mut show_battery_meter = false;
+
     // Turn LEDs off
     populate_frame_buffer(&mut led_bytes, |_| (0x00, 0x00, 0x00));
     led_driver.write_bytes(&led_bytes);
-
-    // RESET REASON FLASH
-    //let rr: usize = system::reset_reason().unwrap() as usize;
-    //populate_frame_buffer(&mut led_bytes, |i| {
-    //    if i < rr {
-    //        (0x0F, 0x0F, 0x00)
-    //    } else {
-    //        (0x00, 0x00, 0x00)
-    //    }
-    //});
-    //led_driver.write_bytes(&led_bytes);
-    //delay::Delay::new().delay(time::Duration::from_millis(50));
-    // END RESET REASON FLASH
 
     match system::reset_reason() {
         Some(rtc_cntl::SocResetReason::SysRtcWdt) => {
@@ -735,11 +729,195 @@ fn power_off_loop(
                 control_driver.feed_wdt();
             }
         }
+        Some(rtc_cntl::SocResetReason::CoreSw) => {
+            show_battery_meter = true;
+        }
         _ => {}
     };
 
-    const FRAME_PERIOD: time::Duration = time::Duration::from_millis(1000);
+    const FRAME_MS: u32 = 33;
+    const ADC_STABLE_MS: u32 = 1000;
+    const BATTERY_METER_FRAMES: u32 = 40;
+    const MAX_BATT_BARS: u32 = 40;
 
+    #[derive(Clone, Copy, Debug)]
+    enum State {
+        PrepareBatteryMeter { frame: u32, stable_counter: u32 },
+        ShowBatteryMeter { battery_bars: u32, frame: u32 },
+        Idle,
+    }
+
+    let mut state = if show_battery_meter {
+        State::PrepareBatteryMeter {
+            frame: 0,
+            stable_counter: 0,
+        }
+    } else {
+        State::Idle
+    };
+
+    loop {
+        let (button_held, button_event) = control_driver.button_poll();
+
+        let usb_power = control_driver.usb_power();
+
+        // Handle transitions
+        match button_event {
+            ButtonEvent::None => {}
+            ButtonEvent::ShortPress => match state {
+                State::Idle => {
+                    state = State::PrepareBatteryMeter {
+                        frame: 0,
+                        stable_counter: 0,
+                    };
+                }
+                _ => {}
+            },
+            ButtonEvent::LongPress => {
+                // Power on!
+                return;
+            }
+        }
+
+        state = match &mut state {
+            State::PrepareBatteryMeter {
+                frame,
+                stable_counter,
+            } => {
+                if button_held {
+                    *stable_counter = 0;
+                } else {
+                    *stable_counter += 1;
+                }
+
+                if *stable_counter >= ADC_STABLE_MS / FRAME_MS {
+                    // ADC is stable--read battery level
+                    if let Some(batt_voltage) = adc_driver.read_battery_voltage() {
+                        println!("Battery voltage is {} mV", batt_voltage);
+                        const BATT_MIN_V: u32 = 3000;
+                        const BATT_MAX_V: u32 = 4200;
+                        let battery_bars = if batt_voltage as u32 <= BATT_MIN_V {
+                            0
+                        } else if batt_voltage as u32 >= BATT_MAX_V {
+                            MAX_BATT_BARS
+                        } else {
+                            let battery_bars = MAX_BATT_BARS * (batt_voltage as u32 - BATT_MIN_V)
+                                / (BATT_MAX_V - BATT_MIN_V);
+                            battery_bars
+                        };
+
+                        let battery_bars = battery_bars.max(1); // Don't show less than 1 bar
+
+                        State::ShowBatteryMeter {
+                            battery_bars,
+                            frame: 0,
+                        }
+                    } else {
+                        // Battery reading failed--
+                        // clear display & return to idle
+                        populate_frame_buffer(&mut led_bytes, |_| (0x00, 0x00, 0x00));
+                        led_driver.write_bytes(&led_bytes);
+                        State::Idle
+                    }
+                } else {
+                    *frame += 1;
+                    state
+                }
+            }
+            State::ShowBatteryMeter {
+                battery_bars: _,
+                frame,
+            } => {
+                *frame += 1;
+                if *frame >= BATTERY_METER_FRAMES {
+                    // Clear display
+                    populate_frame_buffer(&mut led_bytes, |_| (0x00, 0x00, 0x00));
+                    led_driver.write_bytes(&led_bytes);
+
+                    State::Idle
+                } else {
+                    state
+                }
+            }
+            State::Idle => state,
+        };
+
+        // Handle behavior
+        match state {
+            State::PrepareBatteryMeter {
+                frame,
+                stable_counter: _,
+            } => {
+                if usb_power {
+                    // Marching ants
+                    populate_frame_buffer(&mut led_bytes, |i| {
+                        let i = i as u32;
+                        if i % 5 == frame % 5 {
+                            let v = (0x10 * (20 - i.min(20)) / 20) as u8;
+                            (0x00, 0x00, v)
+                        } else {
+                            (0x00, 0x00, 0x00)
+                        }
+                    });
+                    led_driver.write_bytes(&led_bytes);
+                } else {
+                    // Blinking red pixel
+                    populate_frame_buffer(&mut led_bytes, |i| {
+                        if i == 0 && (frame / 2) % 2 == 0 {
+                            (0x10, 0x00, 0x00)
+                        } else {
+                            (0x00, 0x00, 0x00)
+                        }
+                    });
+                    led_driver.write_bytes(&led_bytes);
+                }
+            }
+            State::ShowBatteryMeter {
+                battery_bars,
+                frame,
+            } => {
+                // Sweep transition to battery meter
+                let battery_bars = battery_bars.min(frame * 4);
+                let g = 0x07 * battery_bars / MAX_BATT_BARS;
+                let r = 0x20 * (MAX_BATT_BARS - battery_bars) / MAX_BATT_BARS;
+                let color = (r as u8, g as u8, 0x00);
+
+                populate_frame_buffer(&mut led_bytes, |i| {
+                    let i = i as u32;
+                    if i < battery_bars {
+                        color
+                    } else {
+                        (0x00, 0x00, 0x00)
+                    }
+                });
+                led_driver.write_bytes(&led_bytes);
+            }
+            State::Idle => {}
+        }
+
+        // See whether to hold power on
+        match state {
+            State::Idle => {
+                // If we're idle, hold power on only if button is held
+                // (since button release would trigger an event
+                // but would also turn off power)
+                if button_held {
+                    control_driver.hold_power_on();
+                } else {
+                    control_driver.release_power();
+                }
+            }
+            _ => {
+                // If we're not idle, hold power on
+                control_driver.hold_power_on();
+            }
+        }
+
+        delay::Delay::new().delay(time::Duration::from_millis(FRAME_MS as u64));
+        control_driver.feed_wdt();
+    }
+
+    /*
     // Charging animation
     const BATT_BARS: u16 = 5;
 
@@ -849,6 +1027,7 @@ fn power_off_loop(
 
         control_driver.feed_wdt();
     }
+    */
 }
 
 async fn power_on_loop(
@@ -858,6 +1037,8 @@ async fn power_on_loop(
     adc_driver: &mut AdcDriver,
 ) {
     println!("Power on!");
+
+    control_driver.hold_power_on();
 
     // Temporary battery voltage indicator
     {
@@ -1079,7 +1260,6 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
         power_off_loop(&mut control_driver, &mut led_hardware, &mut adc_driver);
     }
 
-    control_driver.hold_power_on();
     power_on_loop(
         &mut control_driver,
         &mut led_hardware,
@@ -1088,10 +1268,6 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
     )
     .await;
 
-    battery_level_flash(&mut control_driver, &mut led_hardware, &mut adc_driver);
-    control_driver.release_power();
-
-    // Perform a system reset
     system::software_reset();
 }
 
