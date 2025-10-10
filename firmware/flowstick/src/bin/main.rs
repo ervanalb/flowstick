@@ -186,65 +186,6 @@ impl LedDriverLowPower<'_> {
     }
 }
 
-pub struct AdcHardware {
-    adc1: peripherals::ADC1<'static>,
-    //vref_gpio: peripherals::GPIO8<'static>,
-    batt_measure_gpio: peripherals::GPIO9<'static>,
-}
-
-pub struct AdcDriver {
-    //vref: analog::adc::AdcPin<
-    //    peripherals::GPIO8<'static>,
-    //    peripherals::ADC1<'static>,
-    //    analog::adc::AdcCalCurve<peripherals::ADC1<'static>>,
-    //>,
-    batt_measure: analog::adc::AdcPin<
-        peripherals::GPIO9<'static>,
-        peripherals::ADC1<'static>,
-        analog::adc::AdcCalCurve<peripherals::ADC1<'static>>,
-    >,
-    adc: analog::adc::Adc<'static, peripherals::ADC1<'static>, Blocking>,
-}
-
-impl AdcHardware {
-    fn build(self) -> AdcDriver {
-        // ADC for battery
-        let mut adc_config = analog::adc::AdcConfig::new();
-        //let vref = adc_config
-        //    .enable_pin_with_cal::<peripherals::GPIO8<'_>, analog::adc::AdcCalCurve<_>>(
-        //        self.vref_gpio,
-        //        analog::adc::Attenuation::_11dB,
-        //    );
-        let batt_measure = adc_config
-            .enable_pin_with_cal::<peripherals::GPIO9<'_>, analog::adc::AdcCalCurve<_>>(
-                self.batt_measure_gpio,
-                analog::adc::Attenuation::_11dB,
-            );
-        let adc = analog::adc::Adc::new(self.adc1, adc_config);
-
-        AdcDriver {
-            //vref,
-            batt_measure,
-            adc,
-        }
-    }
-}
-
-impl AdcDriver {
-    fn read_battery_voltage(&mut self) -> Option<u16> {
-        const ADC_SAMPLES: u32 = 32;
-        let mut batt_measure: u32 = 0;
-        for _ in 0..ADC_SAMPLES {
-            let reading = self.adc.read_blocking(&mut self.batt_measure);
-            if reading < 400 || reading > 3700 {
-                return None;
-            }
-            batt_measure += reading as u32;
-        }
-        Some((batt_measure * 2 / ADC_SAMPLES) as u16) // Voltage divider divides in half
-    }
-}
-
 pub struct LedHardware {
     dat: peripherals::GPIO21<'static>,
     clk: peripherals::GPIO37<'static>,
@@ -296,23 +237,154 @@ struct ControlDriver {
     pwrhld: gpio::Output<'static>,
     button: gpio::Input<'static>,
     vbus_sense: gpio::Input<'static>,
-    chg_sense: gpio::Input<'static>,
-    imu_spi: spi::master::Spi<'static, Blocking>,
-    //adc: analog::adc::Adc<'static, peripherals::ADC1<'static>, Blocking>,
-    //vref: analog::adc::AdcPin<
-    //    peripherals::GPIO8<'static>,
-    //    peripherals::ADC1<'static>,
-    //    analog::adc::AdcCalBasic<peripherals::ADC1<'static>>,
-    //>,
-    //batt_measure: analog::adc::AdcPin<
-    //    peripherals::GPIO9<'static>,
-    //    peripherals::ADC1<'static>,
-    //    analog::adc::AdcCalBasic<peripherals::ADC1<'static>>,
-    //>,
+    _chg_sense: gpio::Input<'static>,
+    adc: analog::adc::Adc<'static, peripherals::ADC1<'static>, Blocking>,
+    batt_measure: analog::adc::AdcPin<
+        peripherals::GPIO9<'static>,
+        peripherals::ADC1<'static>,
+        analog::adc::AdcCalCurve<peripherals::ADC1<'static>>,
+    >,
     rtc: rtc_cntl::Rtc<'static>,
     last_button_held: bool,
     button_press_timestamp: time::Duration,
     button_longpress_active: bool,
+}
+
+struct ImuHardware {
+    spi: spi::master::Spi<'static, Blocking>,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+enum ImuFifoTag {
+    #[default]
+    Unknown,
+    Accel,
+    Gyro,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct ImuFifoSample {
+    tag: ImuFifoTag,
+    x: i16,
+    y: i16,
+    z: i16,
+}
+
+impl ImuHardware {
+    async fn read_byte(&mut self, addr: u8) -> u8 {
+        let mut buf = [addr | 0x80, 0x00];
+        self.spi.transfer(&mut buf).unwrap();
+        buf[1]
+    }
+
+    async fn read_u16(&mut self, addr: u8) -> u16 {
+        let mut buf = [addr | 0x80, 0x00, 0x00];
+        self.spi.transfer(&mut buf).unwrap();
+        u16::from_le_bytes([buf[1], buf[2]])
+    }
+
+    async fn write_byte(&mut self, addr: u8, data: u8) {
+        self.spi.write(&[addr, data]).unwrap();
+    }
+
+    async fn read_fifo(&mut self, buf: &mut [ImuFifoSample]) -> usize {
+        const FIFO_DATA_OUT_TAG: u8 = 0x78;
+
+        const FIFO_STATUS1: u8 = 0x1B;
+        const DIFF_FIFO_BM: u16 = 0x01FF;
+
+        const TAG_SENSOR_HIGH_G_ACCEL: u8 = 0x1D;
+        const TAG_SENSOR_GYRO: u8 = 0x01;
+
+        // Take minimum of (samples available, buffer size)
+        let len = self.read_u16(FIFO_STATUS1).await & DIFF_FIFO_BM;
+        let len = (len as usize).min(buf.len());
+        let buf = &mut buf[0..len];
+
+        // Do the reads
+        for sample in buf.iter_mut() {
+            let mut bytes = [
+                FIFO_DATA_OUT_TAG | 0x80,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+                0x00,
+            ];
+            self.spi.transfer(&mut bytes).unwrap();
+            *sample = ImuFifoSample {
+                tag: match bytes[1] >> 3 {
+                    TAG_SENSOR_HIGH_G_ACCEL => ImuFifoTag::Accel,
+                    TAG_SENSOR_GYRO => ImuFifoTag::Gyro,
+                    _ => ImuFifoTag::Unknown,
+                },
+                x: i16::from_le_bytes([bytes[2], bytes[3]]),
+                y: i16::from_le_bytes([bytes[4], bytes[5]]),
+                z: i16::from_le_bytes([bytes[6], bytes[7]]),
+            }
+        }
+
+        // Return number of samples read
+        len
+    }
+
+    async fn run(mut self) {
+        const WHO_AM_I: u8 = 0x0F;
+        const FIFO_CTRL3: u8 = 0x09;
+        const FIFO_CTRL4: u8 = 0x0A;
+        const CTRL1_XL_HG: u8 = 0x4E;
+        const CTRL2: u8 = 0x11;
+        const CTRL6: u8 = 0x15;
+        const COUNTER_BDR_REG1: u8 = 0x0B;
+
+        const ODR_BM: u8 = 0x09; // 960 HZ
+        const ODR_HG_BM: u8 = 0x04; // 960 HZ
+        const XL_HG_BATCH_EN_BM: u8 = 0x08;
+
+        const I_AM_LSM6DSV320X: u8 = 0x73;
+        const FIFO_MODE_CONTINUOUS_MODE: u8 = 0x06;
+
+        match self.read_byte(WHO_AM_I).await {
+            I_AM_LSM6DSV320X => {}
+            _ => {
+                println!("LSM6DSV320XM IMU not detected");
+                loop {
+                    Timer::after(Duration::from_millis(10000)).await;
+                }
+            }
+        }
+        println!("Found LSM6DSV320XM IMU!");
+
+        // Setup
+        self.write_byte(CTRL1_XL_HG, (ODR_HG_BM << 3) | 0x04).await; // High-G accel ODR & FS = 128G
+        self.write_byte(CTRL6, 0x03).await; // Gyro FS = 1000 dps
+        self.write_byte(CTRL2, ODR_BM).await; // Gyro ODR
+        self.write_byte(FIFO_CTRL3, ODR_BM << 4).await; // Batch gyro data into FIFO
+        self.write_byte(COUNTER_BDR_REG1, XL_HG_BATCH_EN_BM).await; // Batch high-g accel data into
+                                                                    // FIFO
+        self.write_byte(FIFO_CTRL4, FIFO_MODE_CONTINUOUS_MODE).await; // Turn on FIFO & start
+                                                                      // sampling
+
+        let mut buf = [ImuFifoSample::default(); 512];
+        let mut total_samples: usize = 0;
+        loop {
+            for _ in 0..9 {
+                let len = self.read_fifo(&mut buf).await;
+                total_samples += len;
+                Timer::after(Duration::from_millis(10)).await;
+            }
+            let len = self.read_fifo(&mut buf).await;
+            total_samples += len;
+            Timer::after(Duration::from_millis(10)).await;
+
+            println!("Read {total_samples} IMU samples");
+            if len > 2 {
+                println!("Here's two of them: {:?}, {:?}", buf[0], buf[1]);
+            }
+        }
+    }
 }
 
 struct BleHardware {
@@ -451,7 +523,7 @@ impl<'a> EventHandler for AdvListener<'a> {
     }
 }
 
-fn init() -> (ControlDriver, LedHardware, BleHardware, AdcHardware) {
+fn init() -> (ControlDriver, LedHardware, BleHardware, ImuHardware) {
     esp_alloc::heap_allocator!(size: 72 * 1024);
     let peripherals = esp_hal::init(Config::default());
 
@@ -515,16 +587,25 @@ fn init() -> (ControlDriver, LedHardware, BleHardware, AdcHardware) {
         .unwrap();
 
     let vbus_sense = gpio::Input::new(peripherals.GPIO38, gpio::InputConfig::default());
-    let chg_sense = gpio::Input::new(
+    let _chg_sense = gpio::Input::new(
         peripherals.GPIO12,
         gpio::InputConfig::default().with_pull(gpio::Pull::Up),
     );
+
+    // ADC for battery reading
+    let mut adc_config = analog::adc::AdcConfig::new();
+    let batt_measure = adc_config
+        .enable_pin_with_cal::<peripherals::GPIO9<'_>, analog::adc::AdcCalCurve<_>>(
+            peripherals.GPIO9,
+            analog::adc::Attenuation::_11dB,
+        );
+    let adc = analog::adc::Adc::new(peripherals.ADC1, adc_config);
 
     // SPI for the accelerometer
     let imu_spi = spi::master::Spi::new(
         peripherals.SPI2,
         spi::master::Config::default()
-            .with_frequency(time::Rate::from_khz(100))
+            .with_frequency(time::Rate::from_khz(5000))
             .with_mode(spi::Mode::_0),
     )
     .unwrap()
@@ -548,11 +629,9 @@ fn init() -> (ControlDriver, LedHardware, BleHardware, AdcHardware) {
             pwrhld,
             button,
             vbus_sense,
-            chg_sense,
-            imu_spi,
-            //adc,
-            //vref,
-            //batt_measure,
+            _chg_sense,
+            adc,
+            batt_measure,
             rtc,
             last_button_held: button_held_through_sw_reset,
             button_press_timestamp,
@@ -566,11 +645,7 @@ fn init() -> (ControlDriver, LedHardware, BleHardware, AdcHardware) {
             dma: peripherals.DMA_CH0,
         },
         BleHardware { bt: peripherals.BT },
-        AdcHardware {
-            adc1: peripherals.ADC1,
-            //vref_gpio: peripherals.GPIO8,
-            batt_measure_gpio: peripherals.GPIO9,
-        },
+        ImuHardware { spi: imu_spi },
     )
 }
 
@@ -627,19 +702,11 @@ impl ControlDriver {
         self.vbus_sense.is_high()
     }
 
-    pub fn charging(&self) -> bool {
-        self.chg_sense.is_low()
+    pub fn _charging(&self) -> bool {
+        self._chg_sense.is_low()
     }
 
-    //pub fn read_batt_voltage(&mut self) -> u16 {
-    //    let vref = self.adc.read_blocking(&mut self.vref);
-    //    let batt_measure = self.adc.read_blocking(&mut self.batt_measure);
-    //    (3300_u32 * (batt_measure as u32) / (vref as u32))
-    //        .try_into()
-    //        .unwrap_or(core::u16::MAX)
-    //}
-
-    pub fn sleep(&mut self, duration: time::Duration) {
+    pub fn _sleep(&mut self, duration: time::Duration) {
         let timer = rtc_cntl::sleep::TimerWakeupSource::new(core::time::Duration::from_millis(
             duration.as_millis(),
         ));
@@ -654,6 +721,19 @@ impl ControlDriver {
 
     pub fn feed_wdt(&mut self) {
         self.rtc.rwdt.feed();
+    }
+
+    fn read_battery_voltage(&mut self) -> Option<u16> {
+        const ADC_SAMPLES: u32 = 32;
+        let mut batt_measure: u32 = 0;
+        for _ in 0..ADC_SAMPLES {
+            let reading = self.adc.read_blocking(&mut self.batt_measure);
+            if reading < 400 || reading > 3700 {
+                return None;
+            }
+            batt_measure += reading as u32;
+        }
+        Some((batt_measure * 2 / ADC_SAMPLES) as u16) // Voltage divider divides in half
     }
 }
 
@@ -702,11 +782,7 @@ fn i2s_tx_buffer() -> &'static mut [u8; I2S_TX_BUFFER_SIZE_BYTES] {
     }
 }
 
-fn power_off_loop(
-    control_driver: &mut ControlDriver,
-    led_hardware: &mut LedHardware,
-    adc_driver: &mut AdcDriver,
-) {
+fn power_off_loop(control_driver: &mut ControlDriver, led_hardware: &mut LedHardware) {
     let mut led_driver = led_hardware.build_low_power();
 
     let mut led_bytes = [0_u8; FRAME_SIZE_BYTES];
@@ -792,7 +868,7 @@ fn power_off_loop(
 
                 if *stable_counter >= ADC_STABLE_MS / FRAME_MS {
                     // ADC is stable--read battery level
-                    if let Some(batt_voltage) = adc_driver.read_battery_voltage() {
+                    if let Some(batt_voltage) = control_driver.read_battery_voltage() {
                         println!("Battery voltage is {} mV", batt_voltage);
                         const BATT_MIN_V: u32 = 3000;
                         const BATT_MAX_V: u32 = 4200;
@@ -1034,7 +1110,7 @@ async fn power_on_loop(
     control_driver: &mut ControlDriver,
     led_hardware: &mut LedHardware,
     ble_hardware: BleHardware,
-    adc_driver: &mut AdcDriver,
+    imu_hardware: ImuHardware,
 ) {
     println!("Power on!");
 
@@ -1086,136 +1162,80 @@ async fn power_on_loop(
         0,
     ));
 
-    let result = select(ble_hardware.run(&group_state), async {
-        // Give 100ms or so for BT to initialize, which is very CPU-intensive,
-        // to avoid late DMA feeding
-        Timer::after(Duration::from_millis(100)).await;
+    let result = select(
+        select(ble_hardware.run(&group_state), imu_hardware.run()),
+        async {
+            // Give 100ms or so for BT to initialize, which is very CPU-intensive,
+            // to avoid late DMA feeding
+            Timer::after(Duration::from_millis(100)).await;
 
-        let mut led_dma = led_driver.begin_dma();
+            let mut led_dma = led_driver.begin_dma();
 
-        let mut pattern_ix = 0_u8;
-        let mut pattern = &PATTERNS[pattern_ix as usize];
-        let mut pattern_state = pattern.initial_state();
+            let mut pattern_ix = 0_u8;
+            let mut pattern = &PATTERNS[pattern_ix as usize];
+            let mut pattern_state = pattern.initial_state();
 
-        loop {
-            let mut new_pattern = false;
-            // State sync
-            {
-                let group_state = group_state.borrow();
-                if group_state.pattern != pattern_ix && group_state.pattern < PATTERN_COUNT {
-                    pattern_ix = group_state.pattern;
-                    new_pattern = true;
-                    println!("Sync pattern to {:?}", pattern_ix);
-                }
-            }
-
-            // User input
-            let (_, button_event) = control_driver.button_poll();
-            match button_event {
-                ButtonEvent::None => {}
-                ButtonEvent::ShortPress => {
-                    pattern_ix = (pattern_ix + 1) % PATTERN_COUNT;
-                    {
-                        let mut group_state = group_state.borrow_mut();
-                        group_state.update(pattern_ix);
+            loop {
+                let mut new_pattern = false;
+                // State sync
+                {
+                    let group_state = group_state.borrow();
+                    if group_state.pattern != pattern_ix && group_state.pattern < PATTERN_COUNT {
+                        pattern_ix = group_state.pattern;
+                        new_pattern = true;
+                        println!("Sync pattern to {:?}", pattern_ix);
                     }
-                    new_pattern = true;
-                    println!("Advance pattern to {:?}", pattern_ix);
                 }
-                ButtonEvent::LongPress => {
-                    println!("Power off, goodbye!");
-                    return; // Power Off
+
+                // IMU
+
+                // User input
+                let (_, button_event) = control_driver.button_poll();
+                match button_event {
+                    ButtonEvent::None => {}
+                    ButtonEvent::ShortPress => {
+                        pattern_ix = (pattern_ix + 1) % PATTERN_COUNT;
+                        {
+                            let mut group_state = group_state.borrow_mut();
+                            group_state.update(pattern_ix);
+                        }
+                        new_pattern = true;
+                        println!("Advance pattern to {:?}", pattern_ix);
+                    }
+                    ButtonEvent::LongPress => {
+                        println!("Power off, goodbye!");
+                        return; // Power Off
+                    }
                 }
-            }
 
-            if new_pattern {
-                pattern = &PATTERNS[pattern_ix as usize];
-                pattern_state = pattern.initial_state();
-            }
+                if new_pattern {
+                    pattern = &PATTERNS[pattern_ix as usize];
+                    pattern_state = pattern.initial_state();
+                }
 
-            // Animation
-            led_dma.feed(|buf| pattern.populate_led_frame(&mut pattern_state, buf));
-            control_driver.feed_wdt();
-            yield_now().await;
-        }
-    })
+                // Animation
+                led_dma.feed(|buf| pattern.populate_led_frame(&mut pattern_state, buf));
+                control_driver.feed_wdt();
+                yield_now().await;
+            }
+        },
+    )
     .await;
 
     match result {
-        Either::First(_) => {
+        Either::First(Either::First(_)) => {
             panic!("BLE error");
+        }
+        Either::First(Either::Second(_)) => {
+            panic!("IMU error");
         }
         Either::Second(_) => {}
     }
 }
 
-fn battery_level_flash(
-    control_driver: &mut ControlDriver,
-    led_hardware: &mut LedHardware,
-    adc_driver: &mut AdcDriver,
-) {
-    let mut led_driver = led_hardware.build_low_power();
-
-    let mut led_bytes = [0_u8; FRAME_SIZE_BYTES];
-
-    // Turn LEDs off
-    populate_frame_buffer(&mut led_bytes, |_| (0x00, 0x00, 0x00));
-    led_driver.write_bytes(&led_bytes);
-
-    loop {
-        // Wait for button to be released for 1000 ms
-        let delay_until = control_driver.rtc.time_since_boot() + time::Duration::from_millis(1000);
-        while !control_driver.button.is_high() && control_driver.rtc.time_since_boot() < delay_until
-        {
-        }
-        if !control_driver.button.is_high() {
-            break;
-        }
-    }
-
-    // Show battery indicator
-    const BATT_BARS: u16 = 40;
-    const BRIGHTNESS: u8 = 0x0F;
-    if let Some(batt_voltage) = adc_driver.read_battery_voltage() {
-        println!("Battery voltage is {} mV", batt_voltage);
-        const BATT_MIN_V: u16 = 3000;
-        const BATT_MAX_V: u16 = 4200;
-        let (full_bars, color) = if batt_voltage <= BATT_MIN_V {
-            (0, (BRIGHTNESS, 0x00, 0x00))
-        } else if batt_voltage >= BATT_MAX_V {
-            (BATT_BARS, (0x00, BRIGHTNESS, 0x00))
-        } else {
-            let full_bars = (BATT_BARS as u32 * (batt_voltage - BATT_MIN_V) as u32
-                / (BATT_MAX_V - BATT_MIN_V) as u32) as u16;
-            let r = (BRIGHTNESS as u32 * (BATT_MAX_V - batt_voltage) as u32
-                / (BATT_MAX_V - BATT_MIN_V) as u32) as u8;
-            let g = (BRIGHTNESS as u32 * (batt_voltage - BATT_MIN_V) as u32
-                / (BATT_MAX_V - BATT_MIN_V) as u32) as u8;
-            (full_bars, (r, g, 0x00))
-        };
-
-        let full_bars = full_bars.max(1); // Don't show less than 1 bar
-
-        populate_frame_buffer(&mut led_bytes, |i| {
-            if i < full_bars as usize {
-                color
-            } else {
-                (0x00, 0x00, 0x00)
-            }
-        });
-        led_driver.write_bytes(&led_bytes);
-        delay::Delay::new().delay(time::Duration::from_millis(1000));
-
-        // Turn LEDs off
-        populate_frame_buffer(&mut led_bytes, |_| (0x00, 0x00, 0x00));
-        led_driver.write_bytes(&led_bytes);
-        control_driver.feed_wdt();
-    }
-}
-
 #[esp_rtos::main]
 async fn main(_spawner: embassy_executor::Spawner) -> ! {
-    let (mut control_driver, mut led_hardware, ble_hardware, adc_hardware) = init();
+    let (mut control_driver, mut led_hardware, ble_hardware, imu_hardware) = init();
 
     let reset_reason = system::reset_reason();
 
@@ -1254,17 +1274,15 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
                 */
     };
 
-    let mut adc_driver = adc_hardware.build();
-
     if !skip_power_off {
-        power_off_loop(&mut control_driver, &mut led_hardware, &mut adc_driver);
+        power_off_loop(&mut control_driver, &mut led_hardware);
     }
 
     power_on_loop(
         &mut control_driver,
         &mut led_hardware,
         ble_hardware,
-        &mut adc_driver,
+        imu_hardware,
     )
     .await;
 

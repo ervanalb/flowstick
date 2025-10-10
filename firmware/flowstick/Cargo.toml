@@ -27,7 +27,7 @@ trouble-host = { version = "0.4.0", features = ["default-packet-pool-mtu-255", "
 heapless = "0.9.1"
 bincode = { version = "2.0.1", default-features = false, features = [] }
 rs_shake128 = { version = "0.1.2" }
-esp32s3 = "0.33.0"
+bytemuck = { version = "1.24.0", features = ["derive"] }
 
 [features]
 default = ["esp32s3"]
